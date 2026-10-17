@@ -50,12 +50,9 @@ recognition — the layout, the logo, the hero image — the way you find a tab 
 The same app, re-laid out: an off-canvas drawer, a single scrolling column, and a bottom sheet for
 adding a link.
 
-<center>
-<p>
-  <img src="docs/images/app-mobile.webp" alt="Snapshort on a phone" width="330">
-  &nbsp;&nbsp;
+<p align="center">
+  <img src="docs/images/app-mobile.webp" alt="Snapshot on a phone" width="330">
 </p>
-</center>
 
 The drawer never scrolls as a whole — only the collections and tag lists inside it do — so the
 brand, the five views and the tag cloud stay put. Card actions are always visible and every
