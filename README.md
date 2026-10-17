@@ -140,6 +140,30 @@ Deleting either is safe; they are rebuilt as you use the app.
 
 ---
 
+## Responsive behaviour
+
+The breakpoint is `lg` (1024px). Above it the app is the fixed desktop board; below it the
+layout switches to a phone layout.
+
+| | Desktop (≥1024px) | Mobile (<1024px) |
+|---|---|---|
+| Navigation | Sidebar always visible | Off-canvas drawer behind a hamburger; closed only on request (tap the scrim, `Esc`, or the browser Back gesture) — picking an item leaves it open so subcollections stay visible |
+| Cards | Uniform 3×2 board, 6 per page | Single column, vertical scroll, no pagination |
+| Card actions | Revealed on hover | Always visible, 44px targets |
+| Bookmarklet | Shown in the sidebar footer | Hidden (needs a desktop bookmarks bar) |
+| Collection actions | Revealed on hover | Always visible, tightly grouped (add subcollection, rename, delete) |
+| Add a link | Inline paste field + tag field, always visible | Dark `+` button beside the search field opens a bottom sheet with both fields stacked, and it closes after saving |
+| Pagination | Footer with page controls | Hidden |
+| Collection / tag lists | Capped height with their own scroll; the column scrolls | Take the leftover height and scroll internally; the drawer itself never scrolls |
+| Editor | Centered panel, preview beside the fields | Full-screen sheet, single column |
+| Filing into a collection | Drag a card onto a collection | Editor's Collection field (HTML5 drag does not fire on touch) |
+
+Touch-specific rules are expressed with Tailwind's `pointer-coarse:` variant, so pointer
+devices keep the denser desktop styling. Text inputs step up to 16px on touch because iOS
+Safari zooms the page when focusing anything smaller and does not zoom back.
+
+---
+
 ## Conventions
 
 - **Colour carries meaning.** Emerald marks the primary action and recovery, red marks
@@ -148,7 +172,15 @@ Deleting either is safe; they are rebuilt as you use the app.
   changes; only hover and press states animate. Fading a dark selection pill out while the
   next fades in reads as a flicker.
 - **Content does not fade on view switches.** Refetches swap the cards in one commit.
-- **Inputs share one shape**: `rounded-lg`, `px-3 py-2`, `border-zinc-200`, 12px medium text.
+- **Toasts appear top-centre of the content column**, below the header. On desktop the column
+  starts after the 256px sidebar, so the toast is offset by half that width to line up with the
+  cards rather than the window.
+- **Form controls are filled, never outlined.** One shared `FIELD_CLASS` (`src/lib/ui.ts`) keeps
+  the header, the add sheet, the sidebar and the editor identical; the fill deepens on focus.
+- **Fields are 12px at every breakpoint**, matching the list rows and tag pills around them. The
+  sidebar's inline name fields also copy the row's box, so rename mode does not jump the list.
+- **Inputs share one shape**: `rounded-lg`, `px-3 py-2`, `border-zinc-200`, 12px medium text
+  (16px on touch, see above).
 - UI copy is English.
 
 ## Notes and limitations
@@ -160,3 +192,5 @@ Deleting either is safe; they are rebuilt as you use the app.
   `BOOKMARKLET_CODE` (`src/components/Sidebar.tsx`) when hosting elsewhere.
 - Pages that never stop making network requests are captured with whatever has loaded, after
   a bounded wait, rather than failing.
+- Cards are only draggable on pointer devices; `draggable` is disabled on touch where the
+  gesture does not exist.

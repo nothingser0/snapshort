@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FlipList } from './FlipList';
+import { useCoarsePointer } from '@/lib/useMediaQuery';
 import {
   Compass,
   Clock,
@@ -19,6 +20,7 @@ import {
   Check,
   X,
 } from 'lucide-react';
+import { FIELD_CLASS } from '@/lib/ui';
 
 export type MainView = 'all' | 'favorites' | 'recent' | 'archive' | 'trash';
 
@@ -49,7 +51,7 @@ interface SidebarProps {
   draggingBookmarkId?: string | null;
   onAssignBookmarkToFolder?: (
     bookmarkId: string,
-    folderId: string | null,
+    folderId: string | null
   ) => void;
   counts: {
     all: number;
@@ -58,6 +60,9 @@ interface SidebarProps {
     archive: number;
     trash: number;
   };
+  /** Mobile only: the sidebar is an off-canvas drawer below the `lg` breakpoint. */
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export function Sidebar({
@@ -75,6 +80,8 @@ export function Sidebar({
   draggingBookmarkId = null,
   onAssignBookmarkToFolder,
   counts,
+  mobileOpen = false,
+  onCloseMobile,
 }: SidebarProps) {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -84,6 +91,7 @@ export function Sidebar({
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [editFolderName, setEditFolderName] = useState('');
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const coarsePointer = useCoarsePointer();
   const [sortFoldersByCount, setSortFoldersByCount] = useState(false);
   const [sortTagsByCount, setSortTagsByCount] = useState(false);
 
@@ -116,7 +124,7 @@ export function Sidebar({
       if (bookmarkId) {
         onAssignBookmarkToFolder?.(
           bookmarkId,
-          targetId === NO_COLLECTION ? null : targetId,
+          targetId === NO_COLLECTION ? null : targetId
         );
       }
     },
@@ -154,12 +162,12 @@ export function Sidebar({
 
   // Group top-level folders vs nested child folders
   const orderFolders = <T extends { name: string; count?: number }>(
-    items: T[],
+    items: T[]
   ): T[] =>
     [...items].sort((a, b) =>
       sortFoldersByCount
         ? (b.count ?? 0) - (a.count ?? 0) || a.name.localeCompare(b.name)
-        : a.name.localeCompare(b.name),
+        : a.name.localeCompare(b.name)
     );
   const rootFolders = orderFolders(folders.filter((f) => !f.parent_id));
   const getSubFolders = (parentId: string) =>
@@ -167,7 +175,7 @@ export function Sidebar({
   const orderedTags = [...tags].sort((a, b) =>
     sortTagsByCount
       ? (b.count ?? 0) - (a.count ?? 0) || a.name.localeCompare(b.name)
-      : a.name.localeCompare(b.name),
+      : a.name.localeCompare(b.name)
   );
 
   // Removing is only meaningful while looking inside a collection; elsewhere a
@@ -178,37 +186,55 @@ export function Sidebar({
 
   return (
     <>
-      <aside className="w-64 min-w-[16rem] max-w-[16rem] bg-[#F8F9FA] p-5 flex flex-col justify-between shrink-0 select-none h-full min-h-0 overflow-hidden overflow-x-hidden">
-        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar pr-1 space-y-6">
+      {/* Mobile scrim. Tapping it closes the drawer; it is inert on desktop. */}
+      <button
+        type="button"
+        aria-label="Close navigation"
+        tabIndex={mobileOpen ? 0 : -1}
+        onClick={onCloseMobile}
+        className={`lg:hidden fixed inset-0 z-40 bg-zinc-950/40 backdrop-blur-2xs transition-opacity duration-200 ${
+          mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+      />
+
+      <aside
+        className={`bg-[#F8F9FA] p-5 flex flex-col justify-between select-none h-full min-h-0 overflow-hidden overflow-x-hidden
+          fixed inset-y-0 left-0 z-50 w-[17rem] max-w-[85vw] transition-transform duration-250 ease-out
+          lg:static lg:z-auto lg:w-64 lg:min-w-[16rem] lg:max-w-[16rem] lg:transition-none
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+      >
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden overflow-x-hidden pr-1 space-y-6 lg:overflow-y-auto lg:custom-scrollbar">
           {/* Brand Header */}
-          <div className="flex items-center gap-3 px-2 pt-1">
-            <div className="w-8 h-8 rounded-xl overflow-hidden shadow-xs border border-zinc-200/90 bg-zinc-950 flex items-center justify-center shrink-0">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/logo.svg"
-                alt="Snapshort Logo"
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <div>
-              <span className="font-extrabold text-sm tracking-tight text-zinc-900 block leading-tight">
-                Snapshort
-              </span>
-              <span className="text-[10px] text-zinc-400 font-medium">
-                Visual Bookmarks
-              </span>
+          <div className="flex items-center justify-between gap-2 px-2 pt-1 shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-xl overflow-hidden shadow-xs border border-zinc-200/90 bg-zinc-950 flex items-center justify-center shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/logo.svg"
+                  alt="Snapshort Logo"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <div className="min-w-0">
+                <span className="font-extrabold text-sm tracking-tight text-zinc-900 block leading-tight">
+                  Snapshort
+                </span>
+                <span className="text-[10px] pointer-coarse:text-[11px] text-zinc-400 font-medium">
+                  Visual Bookmarks
+                </span>
+              </div>
             </div>
           </div>
 
           {/* 1. Main Navigation: All Bookmarks, Favorites, Recent, Archive, Trash */}
-          <nav className="space-y-1">
+          <nav className="space-y-1 shrink-0">
             <button
               onClick={() => {
                 onSelectView('all');
                 onSelectFolder(null);
                 onSelectTag(null);
               }}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-[scale] duration-150 active:scale-[0.98] ${
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-[scale] duration-150 active:scale-[0.98] pointer-coarse:min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                 activeView === 'all' && !selectedFolderId && !selectedTag
                   ? 'bg-zinc-900 text-white shadow-xs'
                   : 'text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900'
@@ -220,7 +246,7 @@ export function Sidebar({
               </div>
               {Boolean(counts.all) && (
                 <span
-                  className={`text-[10px] font-mono ${activeView === 'all' && !selectedFolderId && !selectedTag ? 'text-zinc-300' : 'text-zinc-400'}`}
+                  className={`text-[10px] pointer-coarse:text-[11px] font-mono ${activeView === 'all' && !selectedFolderId && !selectedTag ? 'text-zinc-300' : 'text-zinc-400'}`}
                 >
                   {counts.all}
                 </span>
@@ -233,7 +259,7 @@ export function Sidebar({
                 onSelectFolder(null);
                 onSelectTag(null);
               }}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-[scale] duration-150 active:scale-[0.98] ${
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-[scale] duration-150 active:scale-[0.98] pointer-coarse:min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                 activeView === 'favorites'
                   ? 'bg-zinc-900 text-white shadow-xs'
                   : 'text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900'
@@ -245,7 +271,7 @@ export function Sidebar({
               </div>
               {Boolean(counts.favorites) && (
                 <span
-                  className={`text-[10px] font-mono ${activeView === 'favorites' ? 'text-zinc-300' : 'text-zinc-400'}`}
+                  className={`text-[10px] pointer-coarse:text-[11px] font-mono ${activeView === 'favorites' ? 'text-zinc-300' : 'text-zinc-400'}`}
                 >
                   {counts.favorites}
                 </span>
@@ -258,7 +284,7 @@ export function Sidebar({
                 onSelectFolder(null);
                 onSelectTag(null);
               }}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-[scale] duration-150 active:scale-[0.98] ${
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-[scale] duration-150 active:scale-[0.98] pointer-coarse:min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                 activeView === 'recent'
                   ? 'bg-zinc-900 text-white shadow-xs'
                   : 'text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900'
@@ -270,7 +296,7 @@ export function Sidebar({
               </div>
               {Boolean(counts.recent) && (
                 <span
-                  className={`text-[10px] font-mono ${activeView === 'recent' ? 'text-zinc-300' : 'text-zinc-400'}`}
+                  className={`text-[10px] pointer-coarse:text-[11px] font-mono ${activeView === 'recent' ? 'text-zinc-300' : 'text-zinc-400'}`}
                 >
                   {counts.recent}
                 </span>
@@ -283,7 +309,7 @@ export function Sidebar({
                 onSelectFolder(null);
                 onSelectTag(null);
               }}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-[scale] duration-150 active:scale-[0.98] ${
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-[scale] duration-150 active:scale-[0.98] pointer-coarse:min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                 activeView === 'archive'
                   ? 'bg-zinc-900 text-white shadow-xs'
                   : 'text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900'
@@ -295,7 +321,7 @@ export function Sidebar({
               </div>
               {Boolean(counts.archive) && (
                 <span
-                  className={`text-[10px] font-mono ${activeView === 'archive' ? 'text-zinc-300' : 'text-zinc-400'}`}
+                  className={`text-[10px] pointer-coarse:text-[11px] font-mono ${activeView === 'archive' ? 'text-zinc-300' : 'text-zinc-400'}`}
                 >
                   {counts.archive}
                 </span>
@@ -308,7 +334,7 @@ export function Sidebar({
                 onSelectFolder(null);
                 onSelectTag(null);
               }}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-[scale] duration-150 active:scale-[0.98] ${
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-[scale] duration-150 active:scale-[0.98] pointer-coarse:min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                 activeView === 'trash'
                   ? 'bg-red-950 text-red-200 shadow-xs'
                   : 'text-zinc-600 hover:bg-red-50 hover:text-red-700'
@@ -320,7 +346,7 @@ export function Sidebar({
               </div>
               {Boolean(counts.trash) && (
                 <span
-                  className={`text-[10px] font-mono ${activeView === 'trash' ? 'text-red-300' : 'text-red-500'}`}
+                  className={`text-[10px] pointer-coarse:text-[11px] font-mono ${activeView === 'trash' ? 'text-red-300' : 'text-red-500'}`}
                 >
                   {counts.trash}
                 </span>
@@ -329,13 +355,13 @@ export function Sidebar({
           </nav>
 
           {/* 2. Folders & Nested Collections with Rename & Delete */}
-          <div className="space-y-2 flex flex-col min-h-0">
-            <div className="flex items-center justify-between px-2 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
+          <div className="space-y-2 flex flex-col min-h-0 flex-1 max-h-fit lg:flex-none lg:shrink-0">
+            <div className="flex items-center justify-between px-2 text-[11px] pointer-coarse:text-xs font-semibold text-zinc-400 uppercase tracking-wider">
               <span>Collections</span>
               <div className="flex items-center gap-0.5">
                 <button
                   onClick={() => setSortFoldersByCount((on) => !on)}
-                  className={`p-1 rounded transition-colors cursor-pointer ${
+                  className={`p-1 rounded transition-colors cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                     sortFoldersByCount
                       ? 'text-zinc-900'
                       : 'text-zinc-400 hover:text-zinc-800'
@@ -357,7 +383,7 @@ export function Sidebar({
                     setIsCreatingFolder(true);
                     setActiveParentFolderId(null);
                   }}
-                  className="p-1 hover:text-zinc-800 transition-colors cursor-pointer"
+                  className="p-1 hover:text-zinc-800 transition-colors cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25"
                   title="New Top-Level Collection"
                 >
                   <FolderPlus className="w-3.5 h-3.5" />
@@ -380,7 +406,7 @@ export function Sidebar({
                       ? 'Subfolder name...'
                       : 'Collection name...'
                   }
-                  className="flex-1 px-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-medium text-zinc-600 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-300 transition-colors"
+                  className={`flex-1 px-3 py-1.5 pointer-coarse:min-h-11 text-xs font-medium ${FIELD_CLASS}`}
                 />
                 <button
                   type="button"
@@ -389,7 +415,7 @@ export function Sidebar({
                     setNewFolderName('');
                     setActiveParentFolderId(null);
                   }}
-                  className="p-1 text-zinc-400 hover:text-zinc-700 text-xs cursor-pointer"
+                  className="p-1 pointer-coarse:p-3 text-zinc-400 hover:text-zinc-700 text-xs cursor-pointer"
                 >
                   ✕
                 </button>
@@ -397,11 +423,11 @@ export function Sidebar({
             )}
 
             <FlipList
-              className="space-y-0.5 px-1 max-h-40 overflow-y-auto no-scrollbar"
+              className="space-y-0.5 px-1 flex-1 min-h-0 overflow-y-auto no-scrollbar lg:flex-none lg:max-h-40"
               orderKey={`${sortFoldersByCount}-${rootFolders.map((f) => f.id).join(',')}`}
             >
               {rootFolders.length === 0 && !isCreatingFolder && (
-                <p className="text-[11px] text-zinc-400 italic px-2">
+                <p className="text-xs text-zinc-400 italic px-2.5">
                   No collections yet
                 </p>
               )}
@@ -436,18 +462,18 @@ export function Sidebar({
                           autoFocus
                           value={editFolderName}
                           onChange={(e) => setEditFolderName(e.target.value)}
-                          className="flex-1 px-3 py-2 text-xs font-medium text-zinc-600 placeholder:text-zinc-400 bg-white border border-zinc-200 rounded-lg focus:outline-none focus:border-zinc-300 transition-colors"
+                          className={`flex-1 px-3 py-1.5 pointer-coarse:min-h-11 text-xs font-medium ${FIELD_CLASS}`}
                         />
                         <button
                           type="submit"
-                          className="p-1 hover:text-emerald-700"
+                          className="p-1 pointer-coarse:p-2 hover:text-emerald-700"
                         >
                           <Check className="w-3 h-3 text-emerald-600" />
                         </button>
                         <button
                           type="button"
                           onClick={() => setEditingFolderId(null)}
-                          className="p-1 hover:text-zinc-700"
+                          className="p-1 pointer-coarse:p-2 hover:text-zinc-700"
                         >
                           <X className="w-3 h-3 text-zinc-400" />
                         </button>
@@ -455,10 +481,29 @@ export function Sidebar({
                     ) : (
                       <div
                         {...dragOverProps(folder.id)}
-                        onClick={() =>
-                          onSelectFolder(isSelected ? null : folder.id)
-                        }
-                        className={`flex items-center justify-between px-2.5 py-1.5 relative rounded-lg text-xs font-medium cursor-pointer ${
+                        onClick={(e) => {
+                          const row = e.currentTarget;
+                          onSelectFolder(isSelected ? null : folder.id);
+                          // On touch the list opens below the fold, so bring it
+                          // into view; otherwise the subcollections stay unseen.
+                          if (
+                            !isSelected &&
+                            subFolders.length > 0 &&
+                            coarsePointer
+                          ) {
+                            // Wait out the height transition, otherwise the list
+                            // still measures 0px tall and nothing scrolls.
+                            window.setTimeout(() => {
+                              const list =
+                                row.nextElementSibling as HTMLElement | null;
+                              list?.scrollIntoView({
+                                block: 'nearest',
+                                behavior: 'smooth',
+                              });
+                            }, 260);
+                          }
+                        }}
+                        className={`flex items-center justify-between px-2.5 py-1.5 relative rounded-lg text-xs font-medium cursor-pointer pointer-coarse:min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                           isSelected
                             ? 'bg-zinc-900 text-white font-semibold'
                             : 'text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900'
@@ -481,19 +526,19 @@ export function Sidebar({
 
                         <div className="flex items-center gap-1">
                           {Boolean(folder.count) && (
-                            <span className="text-[10px] font-mono opacity-70 group-hover/folder:hidden">
+                            <span className="text-[10px] pointer-coarse:text-[11px] font-mono opacity-70 group-hover/folder:hidden pointer-coarse:hidden">
                               {folder.count}
                             </span>
                           )}
                           {/* Folder Action triggers on hover */}
-                          <div className="hidden group-hover/folder:flex items-center gap-1">
+                          <div className="hidden group-hover/folder:flex pointer-coarse:flex items-center gap-1 pointer-coarse:gap-0.5">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setIsCreatingFolder(true);
                                 setActiveParentFolderId(folder.id);
                               }}
-                              className="p-0.5 hover:text-emerald-600"
+                              className="p-0.5 pointer-coarse:p-2.5 pointer-coarse:-mx-0.5 hover:text-emerald-600"
                               title="Add subfolder"
                             >
                               <FolderPlus className="w-3 h-3" />
@@ -504,7 +549,7 @@ export function Sidebar({
                                 setEditingFolderId(folder.id);
                                 setEditFolderName(folder.name);
                               }}
-                              className="p-0.5 hover:text-zinc-800"
+                              className="p-0.5 pointer-coarse:p-2.5 pointer-coarse:-mx-0.5 hover:text-zinc-800"
                               title="Rename"
                             >
                               <Edit2 className="w-3 h-3" />
@@ -514,7 +559,7 @@ export function Sidebar({
                                 e.stopPropagation();
                                 onRequestDeleteFolder(folder.id, folder.name);
                               }}
-                              className="p-0.5 hover:text-red-600"
+                              className="p-0.5 pointer-coarse:p-2.5 pointer-coarse:-mx-0.5 hover:text-red-600"
                               title="Delete"
                             >
                               <Trash className="w-3 h-3" />
@@ -543,10 +588,10 @@ export function Sidebar({
                                 {...dragOverProps(sub.id)}
                                 onClick={() =>
                                   onSelectFolder(
-                                    selectedFolderId === sub.id ? null : sub.id,
+                                    selectedFolderId === sub.id ? null : sub.id
                                   )
                                 }
-                                className={`flex items-center justify-between px-2.5 py-1 relative rounded-md text-[11px] font-medium cursor-pointer group/sub ${
+                                className={`flex items-center justify-between px-2.5 py-1 relative rounded-md text-[11px] font-medium cursor-pointer pointer-coarse:min-h-11 pointer-coarse:text-xs group/sub focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                                   selectedFolderId === sub.id
                                     ? 'bg-zinc-900 text-white font-semibold'
                                     : 'text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-900'
@@ -566,17 +611,17 @@ export function Sidebar({
                                 </div>
                                 <div className="flex items-center gap-1">
                                   {Boolean(sub.count) && (
-                                    <span className="font-mono text-[9px] opacity-70 group-hover/sub:hidden">
+                                    <span className="font-mono text-[9px] opacity-70 group-hover/sub:hidden pointer-coarse:hidden">
                                       {sub.count}
                                     </span>
                                   )}
-                                  <div className="hidden group-hover/sub:flex items-center gap-1">
+                                  <div className="hidden group-hover/sub:flex pointer-coarse:flex items-center gap-1 pointer-coarse:gap-0.5">
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         onRequestDeleteFolder(sub.id, sub.name);
                                       }}
-                                      className="p-0.5 hover:text-red-600"
+                                      className="p-0.5 pointer-coarse:p-2.5 pointer-coarse:-mx-0.5 hover:text-red-600"
                                     >
                                       <Trash className="w-2.5 h-2.5" />
                                     </button>
@@ -595,15 +640,15 @@ export function Sidebar({
           </div>
 
           {/* 3. Colorful Tags Cloud (Interactive Pill Badges) */}
-          <div className="space-y-2 flex flex-col min-h-0">
-            <div className="flex items-center justify-between px-2 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
+          <div className="space-y-2 flex flex-col min-h-0 flex-1 max-h-fit lg:flex-none lg:shrink-0">
+            <div className="flex items-center justify-between px-2 text-[11px] pointer-coarse:text-xs font-semibold text-zinc-400 uppercase tracking-wider">
               <div className="flex items-center gap-2">
                 <TagIcon className="w-3.5 h-3.5 text-zinc-400" />
                 <span>Tags Cloud</span>
               </div>
               <button
                 onClick={() => setSortTagsByCount((on) => !on)}
-                className={`p-1 rounded transition-colors cursor-pointer ${
+                className={`p-1 rounded transition-colors cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                   sortTagsByCount
                     ? 'text-zinc-900'
                     : 'text-zinc-400 hover:text-zinc-800'
@@ -623,11 +668,11 @@ export function Sidebar({
             </div>
 
             <FlipList
-              className="flex flex-wrap gap-1.5 px-1 max-h-40 overflow-y-auto no-scrollbar"
+              className="flex flex-wrap gap-1.5 px-1 flex-1 min-h-0 overflow-y-auto no-scrollbar lg:flex-none lg:max-h-40"
               orderKey={`${sortTagsByCount}-${orderedTags.map((t) => t.id).join(',')}`}
             >
               {tags.length === 0 ? (
-                <p className="text-[11px] text-zinc-400 italic">No tags yet</p>
+                <p className="text-xs text-zinc-400 italic px-2.5">No tags yet</p>
               ) : (
                 orderedTags.map((t) => {
                   const isSelected = selectedTag === t.name;
@@ -636,14 +681,14 @@ export function Sidebar({
                       key={t.id}
                       data-flip-key={t.id}
                       onClick={() => onSelectTag(isSelected ? null : t.name)}
-                      className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors cursor-pointer whitespace-nowrap ${
+                      className={`px-2.5 py-1 pointer-coarse:min-h-11 pointer-coarse:px-3 rounded-full text-[11px] pointer-coarse:text-xs font-medium border transition-colors cursor-pointer whitespace-nowrap inline-flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                         isSelected ? TAG_PILL_SELECTED_CLASS : TAG_PILL_CLASS
                       }`}
                     >
                       #{t.name}
                       {t.count ? (
                         <span
-                          className={`ml-1 text-[10px] ${
+                          className={`ml-1 text-[10px] pointer-coarse:text-[11px] ${
                             isSelected ? 'text-zinc-300' : 'text-zinc-400'
                           }`}
                         >
@@ -659,12 +704,12 @@ export function Sidebar({
         </div>
 
         {/* Bookmarklet */}
-        <div className="pt-4 border-t border-zinc-200/80 space-y-2 shrink-0">
+        <div className="hidden lg:block pt-4 border-t border-zinc-200/80 space-y-2 shrink-0">
           <a
             ref={bookmarkletRef}
             href="#"
             draggable
-            className="w-full py-2 px-3 bg-white hover:bg-zinc-100 border border-zinc-200 rounded-xl flex items-center justify-center gap-2 text-xs font-medium text-zinc-700 transition-all cursor-grab active:cursor-grabbing shadow-2xs group"
+            className="w-full py-2 pointer-coarse:min-h-11 px-3 bg-white hover:bg-zinc-100 border border-zinc-200 rounded-xl flex items-center justify-center gap-2 text-xs font-medium text-zinc-700 transition-all cursor-grab active:cursor-grabbing shadow-2xs group"
             title="Drag me to your bookmarks bar"
           >
             <GripVertical className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-600 transition-colors" />

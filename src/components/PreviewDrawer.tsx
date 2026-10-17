@@ -16,6 +16,7 @@ import {
   Copy,
   ChevronDown,
 } from 'lucide-react';
+import { FIELD_CLASS } from '@/lib/ui';
 
 interface PreviewDrawerProps {
   bookmark: BookmarkWithTags | null;
@@ -30,7 +31,7 @@ interface PreviewDrawerProps {
       description?: string;
       tag_names?: string[];
       folder_id?: string | null;
-    },
+    }
   ) => Promise<void>;
   onError?: (msg: string) => void;
   onCopyUrl?: (url: string, e: React.MouseEvent) => void;
@@ -66,7 +67,9 @@ export function PreviewDrawer({
   // one reopens). Deriving during render keeps the first paint correct, instead
   // of showing the previous bookmark's values for one frame.
   const [syncedFrom, setSyncedFrom] = useState<string | null>(null);
-  const syncKey = bookmark ? `${bookmark.id}:${active ? 'open' : 'closed'}` : null;
+  const syncKey = bookmark
+    ? `${bookmark.id}:${active ? 'open' : 'closed'}`
+    : null;
   if (bookmark && syncKey !== syncedFrom) {
     setSyncedFrom(syncKey);
     setTitle(bookmark.title || '');
@@ -128,7 +131,7 @@ export function PreviewDrawer({
           });
         } catch (err: unknown) {
           onError?.(
-            err instanceof Error ? err.message : 'Failed to update bookmark',
+            err instanceof Error ? err.message : 'Failed to update bookmark'
           );
         }
       }
@@ -175,14 +178,14 @@ export function PreviewDrawer({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-zinc-950/40 backdrop-blur-sm transition-opacity ${
+      className={`fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-6 bg-zinc-950/40 backdrop-blur-sm transition-opacity ${
         active
           ? 'opacity-100 duration-300 ease-out'
           : 'opacity-0 duration-150 ease-in'
       }`}
     >
       <div
-        className={`relative w-full max-w-6xl bg-white rounded-[28px] shadow-2xl border border-zinc-200/80 overflow-hidden flex flex-col max-h-[90vh] transition ${
+        className={`relative w-full max-w-6xl bg-white rounded-none sm:rounded-[28px] shadow-2xl border-0 sm:border border-zinc-200/80 overflow-hidden flex flex-col h-full sm:h-auto max-h-none sm:max-h-[90vh] transition ${
           active
             ? 'opacity-100 scale-100 translate-y-0 duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]'
             : 'opacity-0 scale-[0.94] translate-y-3 duration-150 ease-in'
@@ -190,8 +193,8 @@ export function PreviewDrawer({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-3.5 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/60 shrink-0">
-          <div className="flex items-center gap-2.5">
+        <div className="px-4 sm:px-6 py-3 sm:py-3.5 border-b border-zinc-100 flex items-center justify-between gap-3 bg-zinc-50/60 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
             {bookmark.favicon_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -204,9 +207,12 @@ export function PreviewDrawer({
                 {domain.charAt(0)}
               </span>
             )}
-            <span className="text-xs font-bold text-zinc-700">{domain}</span>
-            <span className="text-zinc-300">•</span>
-            <span className="text-[10px] font-semibold text-zinc-400">
+            <span className="text-xs font-bold text-zinc-700 truncate">
+              {domain}
+            </span>
+            {/* The saved date is supporting detail; it yields on narrow screens. */}
+            <span className="hidden sm:inline text-zinc-300">•</span>
+            <span className="hidden sm:inline text-[10px] font-semibold text-zinc-400 shrink-0">
               Saved {fullDate}
             </span>
           </div>
@@ -217,7 +223,7 @@ export function PreviewDrawer({
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => onVisit?.(bookmark)}
-              className="px-3.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-full flex items-center gap-1.5 transition-colors shadow-xs"
+              className="px-3.5 py-2 sm:py-1.5 pointer-coarse:min-h-11 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-full flex items-center gap-1.5 transition-colors shadow-xs shrink-0"
             >
               <span>Visit Site</span>
               <ExternalLink className="w-3.5 h-3.5" />
@@ -225,7 +231,7 @@ export function PreviewDrawer({
 
             <button
               onClick={() => void handleClose()}
-              className="p-1.5 rounded-full hover:bg-zinc-100 text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer"
+              className="p-1.5 pointer-coarse:p-3 rounded-full hover:bg-zinc-100 text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -236,7 +242,7 @@ export function PreviewDrawer({
         <form
           id="bookmark-edit-form"
           onSubmit={handleFormSubmit}
-          className="flex-1 overflow-y-auto p-6 min-h-0"
+          className="flex-1 overflow-y-auto p-4 sm:p-6 min-h-0"
         >
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)] gap-6 items-start">
             {/* Left: Screenshot Preview */}
@@ -279,7 +285,7 @@ export function PreviewDrawer({
                 <button
                   type="button"
                   onClick={(e) => onCopyUrl?.(bookmark.url, e)}
-                  className="px-3 py-1.5 bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all duration-150 ease-out active:scale-95 cursor-pointer"
+                  className="px-3 py-1.5 pointer-coarse:min-h-11 bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all duration-150 ease-out active:scale-95 cursor-pointer"
                 >
                   <Copy className="w-3.5 h-3.5" />
                   <span>Copy URL</span>
@@ -293,7 +299,7 @@ export function PreviewDrawer({
             {/* Right: Editable Fields */}
             <div className="rounded-2xl border border-zinc-200/70 bg-white p-5 flex flex-col gap-4 h-full">
               <div>
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] pointer-coarse:text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
                   Title
                 </label>
                 <div className="relative">
@@ -304,20 +310,20 @@ export function PreviewDrawer({
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Bookmark title"
-                    className="w-full pl-8 pr-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-medium text-zinc-600 placeholder:text-zinc-400 focus:border-zinc-300 focus:outline-none transition-colors"
+                    className={`w-full pl-8 pr-3 py-2 pointer-coarse:min-h-11 text-xs font-medium ${FIELD_CLASS}`}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] pointer-coarse:text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
                   Collection
                 </label>
                 <div className="relative" ref={collectionRef}>
                   <button
                     type="button"
                     onClick={() => setCollectionOpen((open) => !open)}
-                    className="w-full flex items-center pl-8 pr-8 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-medium text-zinc-600 text-left focus:border-zinc-300 focus:outline-none transition-colors cursor-pointer"
+                    className={`w-full flex items-center pl-8 pr-8 py-2 pointer-coarse:min-h-11 text-xs font-medium text-left cursor-pointer ${FIELD_CLASS}`}
                   >
                     <Folder className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <span className="truncate">
@@ -388,7 +394,7 @@ export function PreviewDrawer({
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] pointer-coarse:text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
                   URL
                 </label>
                 <div className="relative">
@@ -399,14 +405,14 @@ export function PreviewDrawer({
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
                     placeholder="https://example.com"
-                    className="w-full pl-8 pr-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-medium font-mono text-zinc-600 placeholder:text-zinc-400 focus:border-zinc-300 focus:outline-none transition-colors"
+                    className={`w-full pl-8 pr-3 py-2 pointer-coarse:min-h-11 text-xs font-medium font-mono ${FIELD_CLASS}`}
                   />
                 </div>
               </div>
 
               {/* Grows with the column so the form always matches the preview height */}
               <div className="flex-1 flex flex-col min-h-0">
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] pointer-coarse:text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
                   Description
                 </label>
                 <div className="relative flex-1 min-h-[96px]">
@@ -415,13 +421,13 @@ export function PreviewDrawer({
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Add notes about why you saved this bookmark..."
-                    className="absolute inset-0 w-full pl-8 pr-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-medium text-zinc-600 placeholder:text-zinc-400 focus:border-zinc-300 focus:outline-none transition-colors resize-none"
+                    className="absolute inset-0 w-full pl-8 pr-3 py-2 text-xs font-medium ${FIELD_CLASS} resize-none"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] pointer-coarse:text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
                   Tags (comma separated)
                 </label>
                 <div className="relative">
@@ -431,7 +437,7 @@ export function PreviewDrawer({
                     value={tagInput}
                     onChange={(e) => setTagInput(e.target.value)}
                     placeholder="design, dev, reading"
-                    className="w-full pl-8 pr-3 py-2 bg-white border border-zinc-200 rounded-lg text-xs font-medium text-zinc-600 placeholder:text-zinc-400 focus:border-zinc-300 focus:outline-none transition-colors"
+                    className={`w-full pl-8 pr-3 py-2 pointer-coarse:min-h-11 text-xs font-medium ${FIELD_CLASS}`}
                   />
                 </div>
               </div>
@@ -440,7 +446,7 @@ export function PreviewDrawer({
         </form>
 
         {/* Footer */}
-        <div className="px-6 py-3.5 bg-zinc-50/60 border-t border-zinc-100 flex items-center justify-between shrink-0">
+        <div className="px-4 sm:px-6 py-3 sm:py-3.5 bg-zinc-50/60 border-t border-zinc-100 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2">
             <button
               onClick={(e) => {
@@ -448,7 +454,7 @@ export function PreviewDrawer({
                 onDelete(bookmark.id, e);
                 onClose();
               }}
-              className="px-3.5 py-1.5 text-red-600 hover:bg-red-50 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3.5 py-2 sm:py-1.5 pointer-coarse:min-h-11 text-red-600 hover:bg-red-50 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Delete</span>
@@ -456,14 +462,14 @@ export function PreviewDrawer({
 
             <button
               onClick={(e) => onRetry(bookmark.id, e)}
-              className="px-3.5 py-1.5 bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3.5 py-2 sm:py-1.5 pointer-coarse:min-h-11 bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Re-capture</span>
             </button>
           </div>
 
-          <span className="text-[11px] font-medium text-zinc-400">
+          <span className="hidden lg:inline text-[11px] font-medium text-zinc-400">
             Changes save automatically when you close
           </span>
         </div>

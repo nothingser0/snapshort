@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { BookmarkWithTags } from '@/db/schema';
+import { useCoarsePointer } from '@/lib/useMediaQuery';
 import {
   ArrowUpRight,
   RefreshCw,
@@ -12,6 +13,7 @@ import {
   RotateCcw,
   Archive,
 } from 'lucide-react';
+import { FIELD_CLASS } from '@/lib/ui';
 
 /** Fades content in when it mounts, so new pages and views settle instead of snapping. */
 function FadeIn({
@@ -78,6 +80,10 @@ export function BentoGrid({
   onBookmarkDragStart,
   onBookmarkDragEnd,
 }: BentoGridProps) {
+  // HTML5 drag-and-drop does not fire on touch screens, so cards are not marked
+  // draggable there; moving a bookmark into a collection uses the editor's
+  // Collection field instead.
+  const coarsePointer = useCoarsePointer();
   const [jumpPageInput, setJumpPageInput] = useState('');
 
   // Card tags stay monochrome: color is reserved for status and actions
@@ -93,7 +99,7 @@ export function BentoGrid({
     } else {
       onToast?.(
         `Invalid page number. Please enter a page between 1 and ${totalPages}.`,
-        'error',
+        'error'
       );
       setJumpPageInput('');
     }
@@ -160,7 +166,7 @@ export function BentoGrid({
       <div
         key={b.id}
         onClick={() => onSelectBookmark(b)}
-        draggable
+        draggable={!coarsePointer}
         onDragStart={(e) => {
           e.dataTransfer.setData('text/plain', b.id);
           e.dataTransfer.effectAllowed = 'move';
@@ -171,12 +177,12 @@ export function BentoGrid({
           isFav
             ? 'border-zinc-300 ring-2 ring-zinc-900/5 shadow-md'
             : 'border-zinc-200/80 shadow-xs'
-        } hover:shadow-[0_16px_32px_-10px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 hover:border-zinc-300 transition-all duration-200 ease-out cursor-grab active:cursor-grabbing group flex flex-col justify-between overflow-hidden min-h-0 h-full ${
+        } hover:shadow-[0_16px_32px_-10px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 hover:border-zinc-300 transition-all duration-200 ease-out cursor-grab active:cursor-grabbing group flex flex-col overflow-hidden lg:justify-between lg:min-h-0 lg:h-full ${
           draggingBookmarkId === b.id ? 'opacity-40' : ''
         }`}
       >
         {/* Viewport Screenshot */}
-        <div className="w-full flex-1 min-h-0 bg-zinc-100 relative border-b border-zinc-100 flex items-center justify-center overflow-hidden">
+        <div className="w-full aspect-[16/10] lg:aspect-auto lg:flex-1 lg:min-h-0 bg-zinc-100 relative border-b border-zinc-100 flex items-center justify-center overflow-hidden">
           {b.capture_status === 'ready' && b.screenshot_path ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -191,7 +197,7 @@ export function BentoGrid({
           ) : b.capture_status === 'capturing' ? (
             <div className="flex flex-col items-center justify-center gap-1.5 p-3 text-center">
               <div className="w-4 h-4 border-2 border-emerald-500/20 border-t-emerald-600 rounded-full animate-spin" />
-              <span className="text-[10px] text-zinc-500 font-medium">
+              <span className="text-[10px] pointer-coarse:text-xs text-zinc-500 font-medium">
                 Capturing preview...
               </span>
             </div>
@@ -200,7 +206,7 @@ export function BentoGrid({
               <div className="w-7 h-7 rounded-xl bg-white border border-zinc-200 flex items-center justify-center text-zinc-400 shadow-2xs">
                 <Globe className="w-4 h-4" />
               </div>
-              <span className="inline-flex items-center gap-1 text-[10px] text-zinc-400 font-medium">
+              <span className="inline-flex items-center gap-1 text-[10px] pointer-coarse:text-xs text-zinc-400 font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-zinc-300" />
                 <span>Offline</span>
               </span>
@@ -208,7 +214,7 @@ export function BentoGrid({
           )}
 
           {/* Favicon & Domain Badge (Top Left) */}
-          <div className="absolute top-2.5 left-2.5 z-2 bg-white/95 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold text-zinc-800 shadow-2xs flex items-center gap-1.5 border border-white/80 max-w-[140px]">
+          <div className="absolute top-2.5 left-2.5 z-2 bg-white/95 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] pointer-coarse:text-[11px] font-bold text-zinc-800 shadow-2xs flex items-center gap-1.5 border border-white/80 max-w-[140px]">
             {b.favicon_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -227,11 +233,12 @@ export function BentoGrid({
           {/* Favorite Action Button strictly in Top Right (Clean Monochrome Stroke SVG Icon) */}
           <button
             onClick={(e) => onToggleFavorite(b.id, e)}
-            className={`absolute top-2.5 right-2.5 z-2 p-1 rounded-full transition-all duration-150 ease-out active:scale-125 cursor-pointer border shrink-0 ${
-              isFav
-                ? 'bg-zinc-900 text-white border-zinc-900 shadow-xs'
-                : 'bg-white/90 hover:bg-white text-zinc-400 hover:text-zinc-900 border-zinc-200/80 shadow-2xs opacity-0 group-hover:opacity-100'
-            }`}
+            className={`absolute top-2.5 right-2.5 z-2 p-1 rounded-full transition-all duration-150 ease-out active:scale-125 cursor-pointer border shrink-0
+              pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center ${
+                isFav
+                  ? 'bg-zinc-900 text-white border-zinc-900 shadow-xs'
+                  : 'bg-white/90 hover:bg-white text-zinc-400 hover:text-zinc-900 border-zinc-200/80 shadow-2xs opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100'
+              }`}
             title={isFav ? 'Remove Favorite' : 'Add to Favorites'}
           >
             <Star
@@ -248,11 +255,11 @@ export function BentoGrid({
             </h4>
 
             {b.description ? (
-              <p className="text-[11px] text-zinc-500 line-clamp-2 mt-1 leading-relaxed">
+              <p className="text-[11px] pointer-coarse:text-[13px] text-zinc-500 line-clamp-2 mt-1 leading-relaxed">
                 {b.description}
               </p>
             ) : (
-              <p className="text-[10px] text-zinc-400 font-mono truncate mt-0.5">
+              <p className="text-[10px] pointer-coarse:text-xs text-zinc-400 font-mono truncate mt-0.5">
                 {b.url}
               </p>
             )}
@@ -262,7 +269,7 @@ export function BentoGrid({
                 {b.tags.slice(0, 3).map((t) => (
                   <span
                     key={t.id}
-                    className={`text-[9px] font-semibold px-2 py-0.5 rounded-md ${CARD_TAG_PILL_CLASS}`}
+                    className={`text-[9px] pointer-coarse:text-xs font-semibold px-2 py-0.5 rounded-md ${CARD_TAG_PILL_CLASS}`}
                   >
                     #{t.name}
                   </span>
@@ -272,23 +279,23 @@ export function BentoGrid({
           </div>
 
           {/* Action Footer */}
-          <div className="flex items-center justify-between pt-2.5 border-t border-zinc-100 mt-2 text-[10px] text-zinc-400 font-medium">
+          <div className="flex items-center justify-between pt-2.5 border-t border-zinc-100 mt-2 text-[10px] pointer-coarse:text-xs text-zinc-400 font-medium">
             <span>{dateStr}</span>
 
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200">
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity duration-200 pointer-coarse:gap-0.5">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onOpenExternal(b);
                 }}
-                className="p-1 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                className="p-1 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                 title="Visit website"
               >
                 <ArrowUpRight className="w-3 h-3" />
               </button>
               <button
                 onClick={(e) => onCopyUrl(b.url, e)}
-                className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                 title="Copy URL"
               >
                 <Copy className="w-3 h-3" />
@@ -296,7 +303,7 @@ export function BentoGrid({
               {isDeleted ? (
                 <button
                   onClick={(e) => onRestoreFromTrash?.(b.id, e)}
-                  className="p-1 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                  className="p-1 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                   title="Restore from Trash"
                 >
                   <RotateCcw className="w-3 h-3" />
@@ -305,7 +312,7 @@ export function BentoGrid({
                 <>
                   <button
                     onClick={(e) => onToggleArchive(b.id, e)}
-                    className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                    className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                     title={b.is_archived === 1 ? 'Unarchive' : 'Archive'}
                   >
                     <Archive className="w-3 h-3" />
@@ -315,7 +322,7 @@ export function BentoGrid({
                       e.stopPropagation();
                       onRetryCapture(b.id, e);
                     }}
-                    className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                    className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                     title="Retry Screenshot"
                   >
                     <RefreshCw className="w-3 h-3" />
@@ -324,7 +331,7 @@ export function BentoGrid({
               )}
               <button
                 onClick={(e) => onDeleteBookmark(b.id, e)}
-                className="p-1 hover:text-red-600 hover:bg-red-50 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                className="p-1 hover:text-red-600 hover:bg-red-50 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
                 title={isDeleted ? 'Delete Permanently' : 'Move to Trash'}
               >
                 <Trash2 className="w-3 h-3" />
@@ -344,10 +351,7 @@ export function BentoGrid({
   const showSkeleton = loading && bookmarks.length === 0;
 
   const content = showSkeleton ? (
-    <div
-      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 flex-1 min-h-0"
-      style={{ gridTemplateRows: 'repeat(2, minmax(0, 1fr))' }}
-    >
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:flex-1 lg:min-h-0 lg:[grid-template-rows:repeat(2,minmax(0,1fr))]">
       {[0, 1, 2, 3, 4, 5].map((i) => (
         <div
           key={i}
@@ -372,8 +376,10 @@ export function BentoGrid({
       ))}
     </div>
   ) : bookmarks.length === 0 ? (
-    <FadeIn className="flex-1 min-h-0">
-      <div className="h-full flex flex-col items-center justify-center p-8 text-center max-w-sm mx-auto select-none">
+    /* Centring comes from the flex parent: `h-full` on the child does not resolve
+       inside a flex-grown box, which left the block sitting in the upper third. */
+    <FadeIn className="flex-1 min-h-0 flex items-center justify-center">
+      <div className="flex flex-col items-center justify-center p-8 text-center max-w-sm select-none">
         <div className="w-12 h-12 rounded-2xl bg-zinc-950 flex items-center justify-center mb-3 shadow-md shadow-zinc-900/10 overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.svg" alt="Snapshort" className="w-7 h-7" />
@@ -388,20 +394,17 @@ export function BentoGrid({
     </FadeIn>
   ) : (
     /* UNIFORM GRID: 3 columns x 2 rows = 6 identical cards, every card 1x1 */
-    <div
-      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 flex-1 min-h-0"
-      style={{ gridTemplateRows: 'repeat(2, minmax(0, 1fr))' }}
-    >
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:flex-1 lg:min-h-0 lg:[grid-template-rows:repeat(2,minmax(0,1fr))]">
       {bookmarks.slice(0, 6).map((b) => renderCard(b))}
     </div>
   );
 
   return (
-    <div className="h-full flex flex-col justify-between gap-3 min-h-0 select-none">
+    <div className="min-h-full lg:h-full flex flex-col justify-between gap-3 lg:min-h-0 select-none">
       {content}
 
       {/* Pagination Status & Controls */}
-      <div className="flex items-center justify-between min-h-10 pt-2.5 border-t border-zinc-200/80 shrink-0">
+      <div className="hidden lg:flex items-center justify-between min-h-10 pt-2.5 border-t border-zinc-200/80 shrink-0">
         <div className="flex items-center gap-4">
           <span className="text-xs text-zinc-500 font-medium">
             Page {currentPage} of {totalPages}
@@ -427,7 +430,7 @@ export function BentoGrid({
                 value={jumpPageInput}
                 onChange={(e) => setJumpPageInput(e.target.value)}
                 placeholder="—"
-                className="w-12 h-7 px-2 bg-white border border-zinc-200 rounded-lg text-xs font-medium text-center text-zinc-600 placeholder:text-zinc-400 hover:border-zinc-300 focus:border-zinc-300 focus:outline-none transition-colors"
+                className={`w-12 h-7 px-2 text-xs font-medium text-center ${FIELD_CLASS}`}
               />
             </form>
           )}

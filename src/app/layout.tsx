@@ -33,7 +33,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${jakarta.variable} font-sans antialiased bg-[#ECEEF2] text-zinc-900 h-screen overflow-hidden`}>
+      {/* h-dvh tracks the mobile URL bar; 100vh (h-screen) is taller than the
+          visible area on phones and would clip the bottom of the app. */}
+      <body
+        className={`${jakarta.variable} font-sans antialiased bg-[#ECEEF2] text-zinc-900 h-dvh overflow-hidden`}
+      >
         {children}
       </body>
     </html>

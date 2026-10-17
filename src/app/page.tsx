@@ -6,6 +6,7 @@ import { Header } from '@/components/Header';
 import { BentoGrid } from '@/components/BentoGrid';
 import { PreviewDrawer } from '@/components/PreviewDrawer';
 import { usePresence } from '@/lib/usePresence';
+import { useIsDesktop } from '@/lib/useMediaQuery';
 
 import type { BookmarkWithTags, Tag } from '@/db/schema';
 import { CheckCircle2, Loader2 } from 'lucide-react';
@@ -44,6 +45,9 @@ export default function HomePage() {
   const [draggingBookmarkId, setDraggingBookmarkId] = useState<string | null>(
     null,
   );
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const navEntryRef = useRef(false);
+  const [addRowOpen, setAddRowOpen] = useState(false);
   const [toast, setToast] = useState<ToastState>({
     show: false,
     message: '',
@@ -116,6 +120,73 @@ export default function HomePage() {
       void fetchBookmarks();
     });
   }, [fetchBookmarks]);
+
+  // The drawer is backed by a history entry so the browser/Android Back gesture
+  // closes it, which is what a phone user reaches for first.
+  const openMobileNav = () => {
+    if (!navEntryRef.current) {
+      navEntryRef.current = true;
+      window.history.pushState({ snapshortNav: true }, '');
+    }
+    setMobileNavOpen(true);
+  };
+
+  const closeMobileNav = () => {
+    setMobileNavOpen(false);
+    // Drop the entry we added, otherwise Back would be needed twice.
+    const state: unknown = window.history.state;
+    if (
+      navEntryRef.current &&
+      typeof state === 'object' &&
+      state !== null &&
+      'snapshortNav' in state
+    ) {
+      navEntryRef.current = false;
+      window.history.back();
+    }
+  };
+
+  useEffect(() => {
+    const onPopState = () => {
+      navEntryRef.current = false;
+      setMobileNavOpen(false);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Esc closes the mobile navigation drawer.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMobileNav();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileNavOpen]);
+
+  // Keyboard shortcuts advertised by the header placeholders. Ignored while a
+  // field already has focus, so typing "/" or "n" never hijacks the input.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) {
+        return;
+      }
+      if (e.key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        // Reveal the add row first on mobile, otherwise the focus target is hidden.
+        setAddRowOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // Esc cancels whichever confirmation is open
   useEffect(() => {
@@ -386,12 +457,18 @@ export default function HomePage() {
   };
 
   // Uniform pagination: every page holds exactly 6 identical cards (3 columns x 2 rows)
+  // Desktop shows a fixed 3x2 board of six cards and pages through the rest.
+  // Phones show a single scrolling column of everything: pagination would mean
+  // tapping Next repeatedly to see a handful of cards.
   const ITEMS_PER_PAGE = 6;
+  const isDesktop = useIsDesktop();
   const totalPages = Math.max(1, Math.ceil(bookmarks.length / ITEMS_PER_PAGE));
-  const paginatedBookmarks = bookmarks.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE,
-  );
+  const visibleBookmarks = isDesktop
+    ? bookmarks.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE,
+      )
+    : bookmarks;
 
   // Overlay presence: keeps each layer mounted while its exit transition plays.
   const toastPresence = usePresence(toast.show, 150);
@@ -410,10 +487,15 @@ export default function HomePage() {
   const drawerBookmark = inspectingBookmark ?? lastInspected;
 
   return (
-    <div className="h-screen w-screen flex overflow-hidden font-sans antialiased bg-[#F8F9FA] text-zinc-900">
+    <div className="h-dvh w-full flex overflow-hidden font-sans antialiased bg-[#F8F9FA] text-zinc-900">
       {/* 1. Left Clean Sidebar with 5 Main Views, Collections, and Tag Cloud */}
       <Sidebar
         activeView={activeView}
+        mobileOpen={mobileNavOpen}
+        onCloseMobile={closeMobileNav}
+        // Selection deliberately does NOT close the drawer: a collection that
+        // holds subcollections would hide them the moment you tapped it. Closing
+        // is explicit (scrim, Esc, or the close button).
         onSelectView={setActiveView}
         folders={folders}
         selectedFolderId={selectedFolderId}
@@ -438,8 +520,11 @@ export default function HomePage() {
       />
 
       {/* 2. Main Content Canvas */}
-      <div className="flex-1 flex flex-col min-w-0 h-full border-l border-zinc-200/80 bg-white">
+      <div className="flex-1 flex flex-col min-w-0 h-full bg-white lg:border-l lg:border-zinc-200/80">
         <Header
+          onOpenNav={openMobileNav}
+          addOpen={addRowOpen}
+          onAddOpenChange={setAddRowOpen}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           onAddBookmark={handleAddBookmark}
@@ -449,9 +534,9 @@ export default function HomePage() {
         />
 
         {/* Gallery Workspace */}
-        <main className="flex-1 px-8 py-6 min-h-0 overflow-hidden">
+        <main className="flex-1 px-4 py-4 sm:px-6 lg:px-8 lg:py-6 min-h-0 overflow-y-auto lg:overflow-hidden">
           <BentoGrid
-            bookmarks={paginatedBookmarks}
+            bookmarks={visibleBookmarks}
             loading={loading}
             currentPage={currentPage}
             totalPages={totalPages}
@@ -501,10 +586,10 @@ export default function HomePage() {
       {/* Toast Notification */}
       {toastPresence.mounted && (
         <div
-          className={`fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-2.5 bg-zinc-900 text-white rounded-xl shadow-lg border border-zinc-800 text-xs font-medium transition-all ease-out ${
+          className={`fixed top-20 lg:top-16 left-1/2 lg:left-[calc(50%+8rem)] -translate-x-1/2 z-50 max-w-[calc(100vw-2rem)] flex items-center gap-2.5 px-4 py-2.5 bg-zinc-900 text-white rounded-xl shadow-lg border border-zinc-800 text-xs font-medium transition-all ease-out ${
             toastPresence.active
               ? 'opacity-100 translate-y-0 duration-200'
-              : 'opacity-0 translate-y-3 duration-150'
+              : 'opacity-0 -translate-y-3 duration-150'
           }`}
         >
           {toast.type === 'loading' ? (
@@ -547,7 +632,7 @@ export default function HomePage() {
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setPendingDeleteId(null)}
-                className="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                className="px-4 py-2 pointer-coarse:min-h-11 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -556,7 +641,7 @@ export default function HomePage() {
                 onClick={() =>
                   pendingDeleteId && confirmDelete(pendingDeleteId)
                 }
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+                className="px-4 py-2 pointer-coarse:min-h-11 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
               >
                 {activeView === 'trash'
                   ? 'Delete Permanently'
@@ -593,7 +678,7 @@ export default function HomePage() {
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setPendingDeleteFolder(null)}
-                className="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                className="px-4 py-2 pointer-coarse:min-h-11 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -603,7 +688,7 @@ export default function HomePage() {
                   setPendingDeleteFolder(null);
                   await handleDeleteFolder(id);
                 }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+                className="px-4 py-2 pointer-coarse:min-h-11 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
               >
                 Delete Collection
               </button>
