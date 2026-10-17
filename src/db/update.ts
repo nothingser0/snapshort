@@ -7,6 +7,7 @@ export interface UpdateBookmarkInput {
   url?: string;
   description?: string | null;
   tag_names?: string[];
+  folder_id?: string | null;
 }
 
 export function updateBookmark(id: string, input: UpdateBookmarkInput): BookmarkWithTags | null {
@@ -32,6 +33,11 @@ export function updateBookmark(id: string, input: UpdateBookmarkInput): Bookmark
   if (input.description !== undefined) {
     updates.push('description = ?');
     params.push(input.description ? input.description.trim() : null);
+  }
+
+  if (input.folder_id !== undefined) {
+    updates.push('folder_id = ?');
+    params.push(input.folder_id || null);
   }
 
   params.push(id);

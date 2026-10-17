@@ -27,12 +27,26 @@ export function getDb(): Database.Database {
   // Initialize schema
   dbInstance.exec(SCHEMA_SQL);
   
-  // Migration helper: add is_pinned if table already existed
-  try {
-    dbInstance.exec('ALTER TABLE bookmarks ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0');
-  } catch {
-    // Column already exists
-  }
+  // Dynamic column migrations
+  const runMigration = (sql: string) => {
+    try {
+      dbInstance?.exec(sql);
+    } catch {
+      // Ignore if column or index already exists
+    }
+  };
+
+  runMigration('ALTER TABLE bookmarks ADD COLUMN click_count INTEGER NOT NULL DEFAULT 0');
+  runMigration('ALTER TABLE bookmarks ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0');
+  runMigration('ALTER TABLE bookmarks ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0');
+  runMigration('ALTER TABLE bookmarks ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
+  runMigration('ALTER TABLE bookmarks ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL');
+  runMigration('CREATE INDEX IF NOT EXISTS idx_bookmarks_click_count ON bookmarks(click_count DESC)');
+  runMigration('CREATE INDEX IF NOT EXISTS idx_bookmarks_folder ON bookmarks(folder_id)');
+
+  // Obsolete column: the pinned feature was replaced by favorites. Existing
+  // database files still carry it, so drop it to match the schema.
+  runMigration('ALTER TABLE bookmarks DROP COLUMN is_pinned');
 
   return dbInstance;
 }

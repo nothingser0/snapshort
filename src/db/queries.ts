@@ -15,6 +15,9 @@ export interface BookmarkFilterOptions {
   tag?: string;
   status?: string;
   limit?: number;
+  view?: 'all' | 'favorites' | 'recent' | 'archive' | 'trash';
+  folderId?: string | null;
+  sortBy?: 'most_used' | 'recent' | 'alphabetical';
   offset?: number;
 }
 
@@ -111,10 +114,57 @@ export function createBookmark(input: CreateBookmarkInput): BookmarkWithTags {
   return runTx();
 }
 
+/** Shapes a joined row into a bookmark, parsing the aggregated tags JSON. */
+function mapBookmarkRow(row: Bookmark & { tags_json: string }): BookmarkWithTags {
+  let tags: Tag[] = [];
+  try {
+    const parsed: unknown = JSON.parse(row.tags_json);
+    tags = Array.isArray(parsed) ? (parsed.filter(Boolean) as Tag[]) : [];
+  } catch {
+    tags = [];
+  }
+  const { tags_json: _tagsJson, ...bookmark } = row;
+  void _tagsJson;
+  return { ...bookmark, tags };
+}
+
 export function getBookmarks(options: BookmarkFilterOptions = {}): BookmarkWithTags[] {
   const db = getDb();
   const conditions: string[] = [];
   const params: unknown[] = [];
+
+  let orderByClause = 'ORDER BY b.click_count DESC, b.created_at DESC';
+  if (options.sortBy === 'recent') {
+    orderByClause = 'ORDER BY b.created_at DESC';
+  } else if (options.sortBy === 'alphabetical') {
+    orderByClause = 'ORDER BY b.title COLLATE NOCASE ASC';
+  } else if (options.sortBy === 'most_used') {
+    orderByClause = 'ORDER BY b.click_count DESC, b.created_at DESC';
+  }
+
+  // Main Views: all, favorites, recent, archive, trash
+  if (options.view === 'trash') {
+    conditions.push('b.is_deleted = 1');
+  } else {
+    conditions.push('b.is_deleted = 0'); // Default: exclude trash
+
+    if (options.view === 'archive') {
+      conditions.push('b.is_archived = 1');
+    } else {
+      conditions.push('b.is_archived = 0'); // Default: exclude archived
+      if (options.view === 'favorites') {
+        conditions.push('b.is_favorite = 1');
+      }
+    }
+  }
+
+  if (options.folderId !== undefined) {
+    // A collection view shows its own bookmarks plus every subcollection's
+    conditions.push(
+      '(b.folder_id = ? OR b.folder_id IN (SELECT id FROM folders WHERE parent_id = ?))'
+    );
+    params.push(options.folderId, options.folderId);
+  }
 
   if (options.status) {
     conditions.push('b.capture_status = ?');
@@ -158,26 +208,13 @@ export function getBookmarks(options: BookmarkFilterOptions = {}): BookmarkWithT
     LEFT JOIN tags t ON t.id = bt.tag_id
     ${whereClause}
     GROUP BY b.id
-    ORDER BY b.is_pinned DESC, b.created_at DESC
+    ${orderByClause}
     ${limitClause} ${offsetClause}
   `;
 
   const rows = db.prepare(query).all(...params) as (Bookmark & { tags_json: string })[];
 
-  return rows.map((row) => {
-    let tags: Tag[] = [];
-    try {
-      const parsed = JSON.parse(row.tags_json);
-      tags = Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-    } catch {
-      tags = [];
-    }
-    const { tags_json: _, ...bookmark } = row;
-    return {
-      ...bookmark,
-      tags,
-    };
-  });
+  return rows.map(mapBookmarkRow);
 }
 
 export function getBookmarkById(id: string): BookmarkWithTags | null {
@@ -203,19 +240,7 @@ export function getBookmarkById(id: string): BookmarkWithTags | null {
   const row = db.prepare(query).get(id) as (Bookmark & { tags_json: string }) | undefined;
   if (!row) return null;
 
-  let tags: Tag[] = [];
-  try {
-    const parsed = JSON.parse(row.tags_json);
-    tags = Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-  } catch {
-    tags = [];
-  }
-
-  const { tags_json: _, ...bookmark } = row;
-  return {
-    ...bookmark,
-    tags,
-  };
+  return mapBookmarkRow(row);
 }
 
 export function updateBookmarkStatus(
@@ -258,18 +283,50 @@ export function updateBookmarkStatus(
   db.prepare(`UPDATE bookmarks SET ${updates.join(', ')} WHERE id = ?`).run(...params);
 }
 
-export function togglePinBookmark(id: string): boolean {
+export function toggleFavoriteBookmark(id: string): boolean {
   const db = getDb();
-  const existing = db.prepare('SELECT is_pinned FROM bookmarks WHERE id = ?').get(id) as { is_pinned?: number } | undefined;
+  const existing = db.prepare('SELECT is_favorite FROM bookmarks WHERE id = ?').get(id) as { is_favorite?: number } | undefined;
   if (!existing) return false;
-
-  const newPinned = existing.is_pinned === 1 ? 0 : 1;
-  // If setting to 1, unpin all others so only 1 featured item is pinned
-  if (newPinned === 1) {
-    db.prepare('UPDATE bookmarks SET is_pinned = 0').run();
-  }
-  db.prepare('UPDATE bookmarks SET is_pinned = ? WHERE id = ?').run(newPinned, id);
+  const newFav = existing.is_favorite === 1 ? 0 : 1;
+  db.prepare('UPDATE bookmarks SET is_favorite = ? WHERE id = ?').run(newFav, id);
   return true;
+}
+
+export function toggleArchiveBookmark(id: string): boolean {
+  const db = getDb();
+  const existing = db.prepare('SELECT is_archived FROM bookmarks WHERE id = ?').get(id) as { is_archived?: number } | undefined;
+  if (!existing) return false;
+  const newArch = existing.is_archived === 1 ? 0 : 1;
+  db.prepare('UPDATE bookmarks SET is_archived = ? WHERE id = ?').run(newArch, id);
+  return true;
+}
+
+export function moveToTrashBookmark(id: string): boolean {
+  const db = getDb();
+  const existing = db.prepare('SELECT is_deleted FROM bookmarks WHERE id = ?').get(id) as { is_deleted?: number } | undefined;
+  if (!existing) return false;
+  const newDel = existing.is_deleted === 1 ? 0 : 1; // Toggle trash / restore
+  db.prepare('UPDATE bookmarks SET is_deleted = ? WHERE id = ?').run(newDel, id);
+  return true;
+}
+
+export function incrementBookmarkClicks(id: string): void {
+  const db = getDb();
+  db.prepare('UPDATE bookmarks SET click_count = COALESCE(click_count, 0) + 1 WHERE id = ?').run(id);
+}
+
+export function getViewCounts() {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT
+      COUNT(CASE WHEN is_deleted = 0 AND is_archived = 0 THEN 1 END) as all_count,
+      COUNT(CASE WHEN is_deleted = 0 AND is_archived = 0 AND is_favorite = 1 THEN 1 END) as favorites_count,
+      COUNT(CASE WHEN is_deleted = 0 AND is_archived = 1 THEN 1 END) as archive_count,
+      COUNT(CASE WHEN is_deleted = 1 THEN 1 END) as trash_count,
+      COUNT(CASE WHEN is_deleted = 0 AND is_archived = 0 AND capture_status = 'ready' THEN 1 END) as ready_count
+    FROM bookmarks
+  `).get() as { all_count: number; favorites_count: number; archive_count: number; trash_count: number; ready_count: number };
+  return row;
 }
 
 export function deleteBookmark(id: string): boolean {
@@ -280,5 +337,23 @@ export function deleteBookmark(id: string): boolean {
 
 export function getAllTags(): Tag[] {
   const db = getDb();
-  return db.prepare('SELECT * FROM tags ORDER BY name ASC').all() as Tag[];
+  return db.prepare(`
+    SELECT t.id, t.name, t.color, t.created_at, COUNT(b.id) as count
+    FROM tags t
+    LEFT JOIN bookmark_tags bt ON bt.tag_id = t.id
+    LEFT JOIN bookmarks b ON b.id = bt.bookmark_id AND b.is_deleted = 0 AND b.is_archived = 0
+    GROUP BY t.id
+    ORDER BY t.name COLLATE NOCASE ASC
+  `).all() as (Tag & { count: number })[];
+}
+
+export function getAllFolders() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT f.*, COUNT(b.id) as count
+    FROM folders f
+    LEFT JOIN bookmarks b ON (b.folder_id = f.id OR b.folder_id IN (SELECT id FROM folders WHERE parent_id = f.id)) AND b.is_deleted = 0 AND b.is_archived = 0
+    GROUP BY f.id
+    ORDER BY f.name COLLATE NOCASE ASC
+  `).all();
 }

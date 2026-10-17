@@ -34,8 +34,14 @@ export interface CaptureOptions {
 export async function captureScreenshot(
   bookmarkId: string,
   url: string,
-  options: CaptureOptions = {}
-): Promise<{ success: boolean; screenshotPath?: string; title?: string; faviconUrl?: string; error?: string }> {
+  options: CaptureOptions = {},
+): Promise<{
+  success: boolean;
+  screenshotPath?: string;
+  title?: string;
+  faviconUrl?: string;
+  error?: string;
+}> {
   return limit(async () => {
     // 1. SSRF Safety Check
     const ssrfCheck = await validateSafeUrl(url);
@@ -63,21 +69,59 @@ export async function captureScreenshot(
     });
 
     const page = await context.newPage();
-    const timeout = options.timeoutMs || 15000;
+    const timeout = options.timeoutMs || 30000;
     page.setDefaultTimeout(timeout);
     page.setDefaultNavigationTimeout(timeout);
 
     try {
-      // 3. Navigate to URL
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+      // 3. Navigate. 'domcontentloaded' is the dependable signal; the asset
+      // waits below cover the rest. Using 'load' or 'networkidle' here stalls on
+      // sites that poll or hold connections open (github.com never reaches
+      // networkidle), which previously pushed captures into the timeout.
+      await page
+        .goto(url, { waitUntil: 'domcontentloaded', timeout })
+        .catch(() => {});
 
-      // Short delay for client fonts and layout stabilization
-      const { promise: delayPromise, resolve: delayResolve } = Promise.withResolvers<void>();
-      setTimeout(delayResolve, 1200);
+      // Give the page time to finish loading, but cap it: waiting for a fully
+      // idle network is not possible on chatty sites, and a bounded wait still
+      // captures far more assets than a fixed delay alone.
+      await page.waitForLoadState('load', { timeout: 10000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {});
+
+      // Decode every image, then let fonts finish so text does not reflow.
+      await page
+        .evaluate(async () => {
+          const images = Array.from(document.images);
+          await Promise.all(
+            images.map((img) =>
+              img.complete
+                ? Promise.resolve()
+                : new Promise<void>((resolve) => {
+                    img.addEventListener('load', () => resolve(), {
+                      once: true,
+                    });
+                    img.addEventListener('error', () => resolve(), {
+                      once: true,
+                    });
+                  }),
+            ),
+          );
+          await document.fonts?.ready?.catch(() => {});
+        })
+        .catch(() => {});
+
+      // Layout stabilisation before the shot.
+      const { promise: delayPromise, resolve: delayResolve } =
+        Promise.withResolvers<void>();
+      setTimeout(delayResolve, 800);
       await delayPromise;
 
       let title = (await page.title())?.trim() || undefined;
-      if (!title || title.startsWith('http://') || title.startsWith('https://')) {
+      if (
+        !title ||
+        title.startsWith('http://') ||
+        title.startsWith('https://')
+      ) {
         try {
           const host = new URL(url).hostname.replace(/^www\./, '');
           title = host.charAt(0).toUpperCase() + host.slice(1);
@@ -87,36 +131,71 @@ export async function captureScreenshot(
       }
 
       // Extract meta description automatically
-      const description = await page.evaluate(() => {
-        const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute('content') ||
-                         document.querySelector('meta[property="og:description"]')?.getAttribute('content') ||
-                         document.querySelector('meta[name="twitter:description"]')?.getAttribute('content');
-        if (metaDesc && metaDesc.trim()) {
-          return metaDesc.trim();
-        }
-        // Fallback: first readable paragraph
-        const p = document.querySelector('p');
-        if (p && p.innerText && p.innerText.trim().length > 20) {
-          return p.innerText.trim().slice(0, 180);
-        }
-        return null;
-      }).catch(() => null);
+      const description = await page
+        .evaluate(() => {
+          // 1. Meta tag priority
+          const selectors = [
+            'meta[name="description"]',
+            'meta[property="og:description"]',
+            'meta[name="twitter:description"]',
+            'meta[itemprop="description"]',
+          ];
+          for (const s of selectors) {
+            const val = document.querySelector(s)?.getAttribute('content');
+            if (val && val.trim().length > 5) {
+              return val.trim().slice(0, 240);
+            }
+          }
+          // 2. Main content heuristics (article paragraphs, lead, main)
+          const contentSelectors = [
+            'article p',
+            'main p',
+            '.lead',
+            'header + div p',
+            'p',
+          ];
+          for (const cs of contentSelectors) {
+            const paras = Array.from(document.querySelectorAll(cs));
+            for (const p of paras) {
+              const text = (p as HTMLElement).innerText?.trim();
+              if (
+                text &&
+                text.length > 25 &&
+                !text.includes('cookie') &&
+                !text.includes('JavaScript')
+              ) {
+                return text.slice(0, 240);
+              }
+            }
+          }
+          return null;
+        })
+        .catch(() => null);
 
       const faviconUrl = `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=64`;
 
       // 4. Capture screenshot
-      const filename = `${bookmarkId}.png`;
+      const filename = `${bookmarkId}.webp`;
       const targetFilePath = path.join(SCREENSHOT_DIR, filename);
       const publicPath = `/screenshots/${filename}`;
 
       await page.screenshot({
         path: targetFilePath,
-        type: 'png',
+        type: 'webp',
+        quality: 80,
         fullPage: false,
       });
 
       // 5. Update DB record to ready
-      updateBookmarkStatus(bookmarkId, 'ready', publicPath, null, title, faviconUrl, description);
+      updateBookmarkStatus(
+        bookmarkId,
+        'ready',
+        publicPath,
+        null,
+        title,
+        faviconUrl,
+        description,
+      );
 
       return {
         success: true,
@@ -126,7 +205,8 @@ export async function captureScreenshot(
         faviconUrl,
       };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown screenshot capture error';
+      const message =
+        err instanceof Error ? err.message : 'Unknown screenshot capture error';
       updateBookmarkStatus(bookmarkId, 'failed', null, message);
       return {
         success: false,

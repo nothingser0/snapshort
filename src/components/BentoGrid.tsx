@@ -1,28 +1,62 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { BookmarkWithTags } from '@/db/schema';
-import { 
-  ArrowUpRight, 
-  RefreshCw, 
-  Trash2, 
-  Globe, 
-  Pin, 
-  Sparkles, 
-  ChevronLeft, 
+import {
+  ArrowUpRight,
+  RefreshCw,
+  Trash2,
+  Globe,
+  ChevronLeft,
   ChevronRight,
-  AlertCircle
+  Copy,
+  Star,
+  RotateCcw,
+  Archive,
 } from 'lucide-react';
+
+/** Fades content in when it mounts, so new pages and views settle instead of snapping. */
+function FadeIn({
+  children,
+  className = 'min-h-0 h-full',
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  return (
+    <div
+      className={`${className} transition-opacity ease-out ${
+        shown ? 'opacity-100 duration-150' : 'opacity-0 duration-150'
+      }`}
+    >
+      {children}
+    </div>
+  );
+}
 
 interface BentoGridProps {
   bookmarks: BookmarkWithTags[];
   loading: boolean;
   currentPage: number;
   totalPages: number;
-  totalBookmarksCount: number;
   onPageChange: (page: number) => void;
   onSelectBookmark: (bookmark: BookmarkWithTags) => void;
+  onOpenExternal: (bookmark: BookmarkWithTags) => void;
   onRetryCapture: (id: string, e: React.MouseEvent) => void;
-  onTogglePin: (id: string, e: React.MouseEvent) => void;
+  onToggleFavorite: (id: string, e: React.MouseEvent) => void;
+  onRestoreFromTrash?: (id: string, e: React.MouseEvent) => void;
+  onToggleArchive: (id: string, e: React.MouseEvent) => void;
   onDeleteBookmark: (id: string, e: React.MouseEvent) => void;
+  onCopyUrl: (url: string, e: React.MouseEvent) => void;
+  onToast?: (msg: string, type: 'success' | 'error' | 'loading') => void;
+  draggingBookmarkId?: string | null;
+  onBookmarkDragStart?: (id: string) => void;
+  onBookmarkDragEnd?: () => void;
 }
 
 export function BentoGrid({
@@ -30,326 +64,425 @@ export function BentoGrid({
   loading,
   currentPage,
   totalPages,
-  totalBookmarksCount,
   onPageChange,
   onSelectBookmark,
+  onOpenExternal,
   onRetryCapture,
-  onTogglePin,
+  onToggleFavorite,
+  onRestoreFromTrash,
+  onToggleArchive,
   onDeleteBookmark,
+  onCopyUrl,
+  onToast,
+  draggingBookmarkId = null,
+  onBookmarkDragStart,
+  onBookmarkDragEnd,
 }: BentoGridProps) {
-  if (loading) {
+  const [jumpPageInput, setJumpPageInput] = useState('');
+
+  // Card tags stay monochrome: color is reserved for status and actions
+  const CARD_TAG_PILL_CLASS =
+    'bg-zinc-100 text-zinc-600 border border-zinc-200/70';
+
+  const handleJumpSubmit = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    const target = parseInt(jumpPageInput.trim(), 10);
+    if (!isNaN(target) && target >= 1 && target <= totalPages) {
+      onPageChange(target);
+      setJumpPageInput('');
+    } else {
+      onToast?.(
+        `Invalid page number. Please enter a page between 1 and ${totalPages}.`,
+        'error',
+      );
+      setJumpPageInput('');
+    }
+  };
+
+  const getPaginationItems = (): (number | string)[] => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    if (currentPage <= 4) {
+      return [1, 2, 3, 4, 5, '...', totalPages];
+    }
+    if (currentPage >= totalPages - 3) {
+      return [
+        1,
+        '...',
+        totalPages - 4,
+        totalPages - 3,
+        totalPages - 2,
+        totalPages - 1,
+        totalPages,
+      ];
+    }
+    return [
+      1,
+      '...',
+      currentPage - 1,
+      currentPage,
+      currentPage + 1,
+      '...',
+      totalPages,
+    ];
+  };
+
+  const paginationItems = getPaginationItems();
+
+  // UNIFORM CARD RENDERER: every card is exactly the same size (1 column x 1 row)
+  const renderCard = (b: BookmarkWithTags) => {
+    const isDeleted = b.is_deleted === 1;
+    const isFav = b.is_favorite === 1;
+
+    const domain = (() => {
+      try {
+        return new URL(b.url).hostname.replace(/^www\./, '');
+      } catch {
+        return b.url;
+      }
+    })();
+
+    const cleanTitle = (() => {
+      const raw = b.title?.trim();
+      if (!raw || raw.startsWith('http://') || raw.startsWith('https://')) {
+        return domain.charAt(0).toUpperCase() + domain.slice(1);
+      }
+      return raw;
+    })();
+
+    const dateStr = new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+    }).format(new Date(b.created_at));
+
     return (
-      <div className="grid grid-cols-4 gap-3.5 auto-rows-[115px] animate-pulse">
-        <div className="col-span-1 row-span-1 bg-white rounded-[28px] border border-zinc-200/70" />
-        <div className="col-span-1 row-span-1 bg-white rounded-[28px] border border-zinc-200/70" />
-        <div className="col-span-2 row-span-1 bg-white rounded-[28px] border border-zinc-200/70" />
-        <div className="col-span-2 row-span-2 bg-white rounded-[28px] border border-zinc-200/70" />
-        <div className="col-span-2 row-span-2 bg-white rounded-[28px] border border-zinc-200/70" />
+      <div
+        key={b.id}
+        onClick={() => onSelectBookmark(b)}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData('text/plain', b.id);
+          e.dataTransfer.effectAllowed = 'move';
+          onBookmarkDragStart?.(b.id);
+        }}
+        onDragEnd={onBookmarkDragEnd}
+        className={`bg-white rounded-2xl border ${
+          isFav
+            ? 'border-zinc-300 ring-2 ring-zinc-900/5 shadow-md'
+            : 'border-zinc-200/80 shadow-xs'
+        } hover:shadow-[0_16px_32px_-10px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 hover:border-zinc-300 transition-all duration-200 ease-out cursor-grab active:cursor-grabbing group flex flex-col justify-between overflow-hidden min-h-0 h-full ${
+          draggingBookmarkId === b.id ? 'opacity-40' : ''
+        }`}
+      >
+        {/* Viewport Screenshot */}
+        <div className="w-full flex-1 min-h-0 bg-zinc-100 relative border-b border-zinc-100 flex items-center justify-center overflow-hidden">
+          {b.capture_status === 'ready' && b.screenshot_path ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={b.screenshot_path}
+              alt={cleanTitle}
+              draggable={false}
+              /* Synchronous decode: without it a card entering a view paints its
+                 placeholder for a frame or two, which reads as a white blink. */
+              decoding="sync"
+              className="w-full h-full object-cover object-top transition duration-400 ease-out group-hover:scale-[1.04]"
+            />
+          ) : b.capture_status === 'capturing' ? (
+            <div className="flex flex-col items-center justify-center gap-1.5 p-3 text-center">
+              <div className="w-4 h-4 border-2 border-emerald-500/20 border-t-emerald-600 rounded-full animate-spin" />
+              <span className="text-[10px] text-zinc-500 font-medium">
+                Capturing preview...
+              </span>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center gap-1.5 p-3 text-center bg-zinc-50">
+              <div className="w-7 h-7 rounded-xl bg-white border border-zinc-200 flex items-center justify-center text-zinc-400 shadow-2xs">
+                <Globe className="w-4 h-4" />
+              </div>
+              <span className="inline-flex items-center gap-1 text-[10px] text-zinc-400 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-300" />
+                <span>Offline</span>
+              </span>
+            </div>
+          )}
+
+          {/* Favicon & Domain Badge (Top Left) */}
+          <div className="absolute top-2.5 left-2.5 z-2 bg-white/95 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold text-zinc-800 shadow-2xs flex items-center gap-1.5 border border-white/80 max-w-[140px]">
+            {b.favicon_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={b.favicon_url}
+                alt=""
+                className="w-3.5 h-3.5 rounded-full shrink-0"
+              />
+            ) : (
+              <span className="w-3.5 h-3.5 rounded-full bg-zinc-200 text-zinc-700 flex items-center justify-center text-[8px] font-black uppercase shrink-0">
+                {domain.charAt(0)}
+              </span>
+            )}
+            <span className="truncate">{domain}</span>
+          </div>
+
+          {/* Favorite Action Button strictly in Top Right (Clean Monochrome Stroke SVG Icon) */}
+          <button
+            onClick={(e) => onToggleFavorite(b.id, e)}
+            className={`absolute top-2.5 right-2.5 z-2 p-1 rounded-full transition-all duration-150 ease-out active:scale-125 cursor-pointer border shrink-0 ${
+              isFav
+                ? 'bg-zinc-900 text-white border-zinc-900 shadow-xs'
+                : 'bg-white/90 hover:bg-white text-zinc-400 hover:text-zinc-900 border-zinc-200/80 shadow-2xs opacity-0 group-hover:opacity-100'
+            }`}
+            title={isFav ? 'Remove Favorite' : 'Add to Favorites'}
+          >
+            <Star
+              className={`w-3 h-3 ${isFav ? 'text-white fill-white' : 'text-zinc-600'}`}
+            />
+          </button>
+        </div>
+
+        {/* Content Body */}
+        <div className="p-4 flex flex-col justify-between shrink-0 bg-white">
+          <div>
+            <h4 className="text-xs 2xl:text-sm font-bold text-zinc-900 line-clamp-1 leading-snug">
+              {cleanTitle}
+            </h4>
+
+            {b.description ? (
+              <p className="text-[11px] text-zinc-500 line-clamp-2 mt-1 leading-relaxed">
+                {b.description}
+              </p>
+            ) : (
+              <p className="text-[10px] text-zinc-400 font-mono truncate mt-0.5">
+                {b.url}
+              </p>
+            )}
+
+            {b.tags && b.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {b.tags.slice(0, 3).map((t) => (
+                  <span
+                    key={t.id}
+                    className={`text-[9px] font-semibold px-2 py-0.5 rounded-md ${CARD_TAG_PILL_CLASS}`}
+                  >
+                    #{t.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Action Footer */}
+          <div className="flex items-center justify-between pt-2.5 border-t border-zinc-100 mt-2 text-[10px] text-zinc-400 font-medium">
+            <span>{dateStr}</span>
+
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenExternal(b);
+                }}
+                className="p-1 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                title="Visit website"
+              >
+                <ArrowUpRight className="w-3 h-3" />
+              </button>
+              <button
+                onClick={(e) => onCopyUrl(b.url, e)}
+                className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                title="Copy URL"
+              >
+                <Copy className="w-3 h-3" />
+              </button>
+              {isDeleted ? (
+                <button
+                  onClick={(e) => onRestoreFromTrash?.(b.id, e)}
+                  className="p-1 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                  title="Restore from Trash"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={(e) => onToggleArchive(b.id, e)}
+                    className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                    title={b.is_archived === 1 ? 'Unarchive' : 'Archive'}
+                  >
+                    <Archive className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRetryCapture(b.id, e);
+                    }}
+                    className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                    title="Retry Screenshot"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                  </button>
+                </>
+              )}
+              <button
+                onClick={(e) => onDeleteBookmark(b.id, e)}
+                className="p-1 hover:text-red-600 hover:bg-red-50 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer"
+                title={isDeleted ? 'Delete Permanently' : 'Move to Trash'}
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     );
-  }
+  };
 
-  if (bookmarks.length === 0) {
-    return (
-      <div className="bg-white rounded-[32px] p-10 text-center border border-zinc-200/70 shadow-xs max-w-lg mx-auto my-6">
-        <div className="w-12 h-12 rounded-2xl bg-zinc-900 text-white flex items-center justify-center mx-auto mb-3">
-          <Sparkles className="w-5 h-5 text-emerald-400" />
+  // Every state below fills the same content slot so the layout never shifts.
+  // The skeleton only covers the very first load; later refetches leave the
+  // current cards untouched and swap them in one commit. Anything that faded the
+  // cards in between (per-card fades, refetch dimming) showed up as a light
+  // flicker on every menu switch.
+  const showSkeleton = loading && bookmarks.length === 0;
+
+  const content = showSkeleton ? (
+    <div
+      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 flex-1 min-h-0"
+      style={{ gridTemplateRows: 'repeat(2, minmax(0, 1fr))' }}
+    >
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <div
+          key={i}
+          className="min-h-0 h-full bg-white rounded-2xl border border-zinc-200/80 shadow-xs flex flex-col overflow-hidden animate-pulse"
+        >
+          {/* screenshot area */}
+          <div className="w-full flex-1 min-h-0 bg-zinc-100" />
+          <div className="p-4 space-y-2 shrink-0">
+            <div className="h-3 w-2/3 rounded bg-zinc-200" />
+            <div className="h-2.5 w-full rounded bg-zinc-100" />
+            <div className="h-2.5 w-4/5 rounded bg-zinc-100" />
+            <div className="flex gap-1 pt-1">
+              <div className="h-4 w-12 rounded-md bg-zinc-100" />
+              <div className="h-4 w-10 rounded-md bg-zinc-100" />
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t border-zinc-100">
+              <div className="h-2.5 w-10 rounded bg-zinc-100" />
+              <div className="h-2.5 w-16 rounded bg-zinc-100" />
+            </div>
+          </div>
         </div>
-        <h3 className="text-sm font-bold text-zinc-900 mb-1">Visual Vault Kosong</h3>
-        <p className="text-xs text-zinc-500 mb-4 leading-relaxed">
-          Tempel URL website di kolom atas atau tekan <kbd className="px-1.5 py-0.5 bg-zinc-100 border border-zinc-200 rounded text-[10px] font-mono">N</kbd> untuk quick save.
+      ))}
+    </div>
+  ) : bookmarks.length === 0 ? (
+    <FadeIn className="flex-1 min-h-0">
+      <div className="h-full flex flex-col items-center justify-center p-8 text-center max-w-sm mx-auto select-none">
+        <div className="w-12 h-12 rounded-2xl bg-zinc-950 flex items-center justify-center mb-3 shadow-md shadow-zinc-900/10 overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.svg" alt="Snapshort" className="w-7 h-7" />
+        </div>
+        <h3 className="text-sm font-bold text-zinc-900 mb-1">
+          No Bookmarks Found
+        </h3>
+        <p className="text-xs text-zinc-500 leading-relaxed">
+          No items match this view or filter. Add a new link to begin.
         </p>
       </div>
-    );
-  }
-
-  const slotCoordinates = [
-    { gridColumn: '1 / 3', gridRow: '2 / 4', isHorizontal: false, isHero: true },
-    { gridColumn: '3 / 5', gridRow: '2 / 4', isHorizontal: true, isHero: false },
-    { gridColumn: '1 / 2', gridRow: '4 / 6', isHorizontal: false, isHero: false },
-    { gridColumn: '2 / 4', gridRow: '4 / 5', isHorizontal: true, isHero: false },
-    { gridColumn: '4 / 5', gridRow: '4 / 6', isHorizontal: false, isHero: false },
-    { gridColumn: '2 / 4', gridRow: '5 / 6', isHorizontal: true, isHero: false },
-  ];
+    </FadeIn>
+  ) : (
+    /* UNIFORM GRID: 3 columns x 2 rows = 6 identical cards, every card 1x1 */
+    <div
+      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 flex-1 min-h-0"
+      style={{ gridTemplateRows: 'repeat(2, minmax(0, 1fr))' }}
+    >
+      {bookmarks.slice(0, 6).map((b) => renderCard(b))}
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
-      {/* 4-Column Interlocking Mosaic Puzzle */}
-      <div 
-        className="grid grid-cols-4 gap-3.5"
-        style={{
-          gridTemplateRows: 'repeat(5, 115px)',
-        }}
-      >
-        {/* Row 1, Col 1: Active Links Mint Card (1x1) */}
-        <div 
-          style={{ gridColumn: '1 / 2', gridRow: '1 / 2' }}
-          className="bg-[#E4FBF1] rounded-[28px] p-4 border border-emerald-200/60 shadow-xs flex flex-col justify-between"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-black text-emerald-950 uppercase tracking-wider">Active Links</span>
-            <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-xs">
-              <ArrowUpRight className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div>
-            <span className="text-3xl font-black text-emerald-950 tracking-tight leading-none">
-              {totalBookmarksCount}
-            </span>
-            <p className="text-[10px] text-emerald-800/80 font-bold mt-0.5">Saved in database</p>
-          </div>
-        </div>
+    <div className="h-full flex flex-col justify-between gap-3 min-h-0 select-none">
+      {content}
 
-        {/* Row 1, Col 2: Ready Previews Peach Card (1x1) */}
-        <div 
-          style={{ gridColumn: '2 / 3', gridRow: '1 / 2' }}
-          className="bg-[#FEF5E7] rounded-[28px] p-4 border border-amber-200/60 shadow-xs flex flex-col justify-between"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-black text-amber-950 uppercase tracking-wider">Ready Previews</span>
-            <div className="w-5 h-5 rounded-full bg-amber-600 text-white flex items-center justify-center shadow-xs">
-              <ArrowUpRight className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div>
-            <span className="text-3xl font-black text-amber-950 tracking-tight leading-none">
-              {bookmarks.filter((b) => b.capture_status === 'ready').length}
-            </span>
-            <p className="text-[10px] text-amber-800/80 font-bold mt-0.5">Rendered thumbnails</p>
-          </div>
-        </div>
-
-        {/* Row 1, Col 3-4: Engine Status Dark Card (2x1) */}
-        <div 
-          style={{ gridColumn: '3 / 5', gridRow: '1 / 2' }}
-          className="bg-[#18191E] text-white rounded-[28px] p-4 border border-zinc-800 shadow-xs flex items-center justify-between"
-        >
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[11px] font-black uppercase tracking-widest text-zinc-400">Engine Status</span>
-            </div>
-            <h4 className="text-xs font-bold text-zinc-100">Chromium Headless Daemon</h4>
-            <p className="text-[10px] text-zinc-400 font-mono">Concurrency: 2 • SQLite WAL</p>
-          </div>
-          <div className="px-3 py-1 bg-zinc-800/80 rounded-full border border-zinc-700/60 text-[11px] font-bold text-emerald-400 font-mono">
-            ONLINE
-          </div>
-        </div>
-
-        {/* 6 Interlocking Bookmark Cards */}
-        {bookmarks.slice(0, 6).map((bookmark, index) => {
-          const isPinned = bookmark.is_pinned === 1;
-          const slot = slotCoordinates[index] || {
-            gridColumn: 'auto',
-            gridRow: 'auto',
-            isHorizontal: false,
-            isHero: false,
-          };
-
-          const domain = (() => {
-            try {
-              return new URL(bookmark.url).hostname.replace(/^www\./, '');
-            } catch {
-              return bookmark.url;
-            }
-          })();
-
-          const cleanDisplayTitle = (() => {
-            const raw = bookmark.title?.trim();
-            if (!raw || raw.startsWith('http://') || raw.startsWith('https://')) {
-              return domain.charAt(0).toUpperCase() + domain.slice(1);
-            }
-            return raw;
-          })();
-
-          const fullDate = new Intl.DateTimeFormat('id-ID', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          }).format(new Date(bookmark.created_at));
-
-          return (
-            <div
-              key={bookmark.id}
-              style={{
-                gridColumn: slot.gridColumn,
-                gridRow: slot.gridRow,
-              }}
-              onClick={() => onSelectBookmark(bookmark)}
-              className={`bg-white rounded-[28px] p-3.5 border border-zinc-200/70 shadow-xs hover:shadow-md transition-all duration-300 cursor-pointer group flex ${
-                slot.isHorizontal ? 'flex-row items-center gap-4' : 'flex-col justify-between'
-              } overflow-hidden`}
-            >
-              {/* Thumbnail Viewport with Polished Fallback Graphic */}
-              <div
-                className={`${
-                  slot.isHorizontal
-                    ? 'w-[45%] h-full shrink-0'
-                    : slot.isHero
-                    ? 'w-full h-32 shrink-0 mb-2'
-                    : 'w-full h-28 shrink-0 mb-1.5'
-                } rounded-[18px] overflow-hidden bg-gradient-to-br from-zinc-50 to-zinc-100 relative border border-zinc-200/60 flex items-center justify-center`}
-              >
-                {bookmark.capture_status === 'ready' && bookmark.screenshot_path ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={bookmark.screenshot_path}
-                    alt={cleanDisplayTitle}
-                    className="w-full h-full object-cover object-top group-hover:scale-102 transition-transform duration-300"
-                  />
-                ) : bookmark.capture_status === 'capturing' ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-1.5 p-2 text-center bg-zinc-50/80">
-                    <div className="w-5 h-5 border-2 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin" />
-                    <span className="text-[10px] text-zinc-500 font-semibold tracking-wide">Capturing...</span>
-                  </div>
-                ) : (
-                  // Elegant Fallback Graphic for Failed / Inaccessible Webpages
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-1.5 p-3 text-center bg-gradient-to-b from-zinc-50/50 to-zinc-100/80">
-                    <div className="w-8 h-8 rounded-xl bg-white border border-zinc-200 flex items-center justify-center text-zinc-400 shadow-2xs">
-                      <Globe className="w-4 h-4" />
-                    </div>
-                    <span className="text-[10px] font-bold text-zinc-500 truncate max-w-[120px]">
-                      {domain}
-                    </span>
-                    <span className="text-[9px] text-zinc-400">Offline / Timeout</span>
-                  </div>
-                )}
-
-                {/* Favicon & Domain Badge */}
-                <div className="absolute top-2 left-2 bg-white/95 backdrop-blur-md px-2.5 py-0.5 rounded-full text-[9px] font-bold text-zinc-800 shadow-2xs flex items-center gap-1 border border-white/60">
-                  {bookmark.favicon_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={bookmark.favicon_url} alt="" className="w-3 h-3 rounded-full" />
-                  ) : (
-                    <Globe className="w-3 h-3 text-zinc-400" />
-                  )}
-                  <span className="truncate max-w-[90px]">{domain}</span>
-                </div>
-
-                {/* Pin Action Button */}
-                <button
-                  onClick={(e) => onTogglePin(bookmark.id, e)}
-                  className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                    isPinned
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200/80 shadow-2xs'
-                      : 'bg-white/80 hover:bg-white text-zinc-400 hover:text-zinc-800 border border-zinc-200/60'
-                  }`}
-                  title={isPinned ? 'Unpin bookmark' : 'Pin as Featured'}
-                >
-                  <Pin className={`w-2 h-2 ${isPinned ? 'fill-emerald-700 text-emerald-700' : ''}`} />
-                  <span>{isPinned ? 'Pinned' : 'Pin'}</span>
-                </button>
-              </div>
-
-              {/* Content Details */}
-              <div className="flex-1 flex flex-col justify-between min-w-0 h-full py-0.5">
-                <div>
-                  <h4 className="text-xs font-bold text-zinc-900 line-clamp-1 leading-snug group-hover:text-emerald-700 transition-colors">
-                    {cleanDisplayTitle}
-                  </h4>
-
-                  {bookmark.description ? (
-                    <p className="text-[10px] text-zinc-500 line-clamp-2 mt-1 leading-relaxed">
-                      {bookmark.description}
-                    </p>
-                  ) : (
-                    <p className="text-[10px] text-zinc-400 font-mono truncate mt-0.5">
-                      {bookmark.url}
-                    </p>
-                  )}
-
-                  {bookmark.tags && bookmark.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {bookmark.tags.slice(0, 3).map((t) => (
-                        <span
-                          key={t.id}
-                          className="text-[9px] font-bold px-2 py-0.5 bg-zinc-100 text-zinc-600 rounded-full"
-                        >
-                          #{t.name}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Bottom metadata */}
-                <div className="flex items-center justify-between pt-1.5 border-t border-zinc-100 mt-1 text-[9px] text-zinc-400 font-medium">
-                  <span className="truncate">{fullDate}</span>
-
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRetryCapture(bookmark.id, e);
-                      }}
-                      className="p-1 hover:text-zinc-800 cursor-pointer"
-                      title="Retry Screenshot"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteBookmark(bookmark.id, e);
-                      }}
-                      className="p-1 hover:text-red-600 cursor-pointer"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Pagination Controls */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2 pt-3 border-t border-zinc-200/60">
-          <span className="text-xs font-bold text-zinc-500">
-            Halaman {currentPage} dari {totalPages} ({totalBookmarksCount} total link)
+      {/* Pagination Status & Controls */}
+      <div className="flex items-center justify-between min-h-10 pt-2.5 border-t border-zinc-200/80 shrink-0">
+        <div className="flex items-center gap-4">
+          <span className="text-xs text-zinc-500 font-medium">
+            Page {currentPage} of {totalPages}
           </span>
 
+          {/* Direct jump: only meaningful when there are enough pages to need it */}
+          {totalPages > 5 && (
+            <form
+              onSubmit={handleJumpSubmit}
+              className="flex items-center gap-2"
+            >
+              <label
+                htmlFor="jump-page-input"
+                className="text-xs text-zinc-500 font-medium"
+              >
+                Go to page
+              </label>
+              <input
+                id="jump-page-input"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={jumpPageInput}
+                onChange={(e) => setJumpPageInput(e.target.value)}
+                placeholder="—"
+                className="w-12 h-7 px-2 bg-white border border-zinc-200 rounded-lg text-xs font-medium text-center text-zinc-600 placeholder:text-zinc-400 hover:border-zinc-300 focus:border-zinc-300 focus:outline-none transition-colors"
+              />
+            </form>
+          )}
+        </div>
+
+        {totalPages > 1 && (
           <div className="flex items-center gap-2">
             <button
               onClick={() => onPageChange(Math.max(1, currentPage - 1))}
               disabled={currentPage <= 1}
-              className="px-3.5 py-1.5 bg-white border border-zinc-200 rounded-full text-xs font-bold text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-50 flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+              className="px-3 py-1 bg-white border border-zinc-200 rounded-full text-xs font-semibold text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-50 flex items-center gap-1 shadow-2xs transition-all duration-150 ease-out active:scale-95 cursor-pointer"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
-              <span>Sebelumnya</span>
+              <span>Previous</span>
             </button>
 
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-              <button
-                key={p}
-                onClick={() => onPageChange(p)}
-                className={`w-7 h-7 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                  currentPage === p
-                    ? 'bg-zinc-900 text-white shadow-2xs'
-                    : 'bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
+            {paginationItems.map((p, idx) => {
+              if (p === '...') {
+                return (
+                  <span
+                    key={`ellipsis-${idx}`}
+                    className="w-5 text-center text-xs font-bold text-zinc-400"
+                  >
+                    ...
+                  </span>
+                );
+              }
+              return (
+                <button
+                  key={p}
+                  onClick={() => onPageChange(Number(p))}
+                  className={`w-7 h-7 rounded-full text-xs font-bold transition-all duration-150 ease-out active:scale-95 cursor-pointer ${
+                    currentPage === p
+                      ? 'bg-zinc-900 text-white shadow-2xs'
+                      : 'bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50'
+                  }`}
+                >
+                  {p}
+                </button>
+              );
+            })}
 
             <button
-              onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+              onClick={() =>
+                onPageChange(Math.min(totalPages, currentPage + 1))
+              }
               disabled={currentPage >= totalPages}
-              className="px-3.5 py-1.5 bg-white border border-zinc-200 rounded-full text-xs font-bold text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-50 flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+              className="px-3 py-1 bg-white border border-zinc-200 rounded-full text-xs font-semibold text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-50 flex items-center gap-1 shadow-2xs transition-all duration-150 ease-out active:scale-95 cursor-pointer"
             >
-              <span>Berikutnya</span>
+              <span>Next</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

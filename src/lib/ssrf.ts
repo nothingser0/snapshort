@@ -69,19 +69,19 @@ export async function validateSafeUrl(rawUrl: string): Promise<SafeUrlResult> {
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { safe: false, reason: 'Only HTTP and HTTPS protocols are permitted' };
+    return { safe: false, reason: 'Only HTTP and HTTPS protocols are supported' };
   }
 
   const hostname = parsed.hostname.toLowerCase();
 
   if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
-    return { safe: false, reason: 'Access to local domain is forbidden' };
+    return { safe: false, reason: 'Local domains cannot be bookmarked' };
   }
 
   // Check if hostname is direct IP
   if (net.isIP(hostname)) {
     if (isPrivateIp(hostname)) {
-      return { safe: false, reason: 'Access to private or local IP addresses is forbidden' };
+      return { safe: false, reason: 'Private/local IP addresses are forbidden' };
     }
     return { safe: true, url: parsed };
   }
@@ -90,16 +90,16 @@ export async function validateSafeUrl(rawUrl: string): Promise<SafeUrlResult> {
   try {
     const lookup = await dns.lookup(hostname, { all: true });
     if (!lookup || lookup.length === 0) {
-      return { safe: false, reason: 'Domain could not be resolved' };
+      return { safe: false, reason: 'Website could not be reached or domain is inactive' };
     }
 
     for (const record of lookup) {
       if (isPrivateIp(record.address)) {
-        return { safe: false, reason: `Domain resolves to forbidden private IP address: ${record.address}` };
+        return { safe: false, reason: `Domain resolves to a forbidden private address: ${record.address}` };
       }
     }
   } catch {
-    return { safe: false, reason: 'DNS resolution failed' };
+    return { safe: false, reason: 'Website could not be reached or domain is inactive' };
   }
 
   return { safe: true, url: parsed };
