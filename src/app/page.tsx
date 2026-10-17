@@ -131,13 +131,23 @@ export default function HomePage() {
     (b) => b.capture_status === 'pending' || b.capture_status === 'capturing',
   );
 
+  // Queue progress, shown in the header while captures are outstanding: the user asked to see
+  // where the queue is, and a bare "Queued..." gives no sense of whether it is moving.
+  const pendingCount = bookmarks.filter((b) => b.capture_status === 'pending').length;
+  const capturingCount = bookmarks.filter(
+    (b) => b.capture_status === 'capturing',
+  ).length;
+
   useEffect(() => {
     if (!hasUnsettledCaptures) return;
+    // Poll faster while something is actively rendering, so a finishing capture shows up
+    // promptly; the queue is the database, so a slower tick is enough when it is idle.
+    const interval = capturingCount > 0 ? 1200 : 2000;
     const timer = setInterval(() => {
       void fetchBookmarks();
-    }, 2000);
+    }, interval);
     return () => clearInterval(timer);
-  }, [hasUnsettledCaptures, fetchBookmarks]);
+  }, [hasUnsettledCaptures, capturingCount, fetchBookmarks]);
 
   // The drawer is backed by a history entry so the browser/Android Back gesture
   // closes it, which is what a phone user reaches for first.
@@ -200,6 +210,9 @@ export default function HomePage() {
         e.preventDefault();
         // Reveal the add row first on mobile, otherwise the focus target is hidden.
         setAddRowOpen(true);
+        requestAnimationFrame(() => {
+          urlInputRef.current?.focus();
+        });
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -545,6 +558,8 @@ export default function HomePage() {
           onAddOpenChange={setAddRowOpen}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          pendingCaptures={pendingCount}
+          capturingNow={capturingCount}
           onAddBookmark={handleAddBookmark}
           onToast={(msg, type) => showToast(msg, type, 2500)}
           searchInputRef={searchInputRef}

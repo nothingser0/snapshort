@@ -146,8 +146,53 @@ export async function recoverInterruptedCaptures(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Queue worker
+// ---------------------------------------------------------------------------
+
+let pumpRunning = false;
+let pumpRequested = false;
+
 /**
- * Runs the boot-time recovery exactly once per process.
+ * Drains every unsettled bookmark, then stops.
+ *
+ * The queue is the database, not memory: `pending`/`capturing` rows are the work list, and each
+ * pass re-reads it. That covers rows that were never queued at all — an import or seed script
+ * writes directly to SQLite, so nothing in the app ever called `captureScreenshot` for them.
+ * Asking again while a pass is running sets a flag instead of starting a second drain.
+ */
+export async function pumpCaptureQueue(): Promise<void> {
+  if (!config.captureEnabled) return;
+  if (pumpRunning) {
+    pumpRequested = true;
+    return;
+  }
+
+  pumpRunning = true;
+  try {
+    do {
+      pumpRequested = false;
+      const { getUnsettledCaptures } = await import('../db/queries');
+      const pending = getUnsettledCaptures();
+      if (pending.length === 0) break;
+
+      // A capture that is genuinely in flight in this process is already counted; the rest
+      // are queued. `inFlight` makes the second call a no-op rather than a duplicate render.
+      const queue = pending.filter((row) => !inFlight.has(row.id));
+      if (queue.length === 0) break;
+
+      console.info(`[capture] draining ${queue.length} bookmark(s)`);
+      await Promise.all(
+        queue.map((row) => captureScreenshot(row.id, row.url).catch(() => {})),
+      );
+    } while (pumpRequested);
+  } finally {
+    pumpRunning = false;
+  }
+}
+
+/**
+ * Runs recovery and starts draining, once per process.
  *
  * Called from the data layer rather than a framework hook: this project runs on Next's dev
  * server as much as on `next start`, and a module-level guard survives the module reloads that
@@ -157,23 +202,20 @@ export async function reconcileCaptureStateOnce(): Promise<void> {
   if (reconciled) return;
   reconciled = true;
 
-  const { getStalledCaptures, failStalledCaptures } = await import('../db/queries');
+  const { failStalledCaptures } = await import('../db/queries');
 
   if (!config.captureEnabled) {
     failStalledCaptures('Screenshot capture is disabled');
     return;
   }
 
-  // A capture cannot legitimately run longer than its navigation budget plus the launch
-  // budget, so anything older than both is work that died with the previous process. The grace
-  // period also keeps a second process from stealing a capture that is genuinely in flight.
-  const stalled = getStalledCaptures(
-    config.captureTimeoutMs + config.captureLaunchTimeoutMs,
-  );
-  if (stalled.length > 0) {
-    console.info(`[capture] requeueing ${stalled.length} interrupted capture(s)`);
-    await recoverInterruptedCaptures(stalled);
-  }
+  // Every unsettled row is drained, including ones no request ever queued.
+  void pumpCaptureQueue().catch(() => {});
+}
+
+/** True while the queue is working through rows; the UI polls faster in that window. */
+export function captureQueueBusy(): boolean {
+  return pumpRunning || inFlight.size > 0;
 }
 
 export async function closeCaptureBrowser(): Promise<void> {

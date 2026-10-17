@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBookmarks, createBookmark, getAllTags, getAllFolders, getViewCounts, hashUrl } from '@/db/queries';
 import { getDb } from '@/db/index';
-import { captureScreenshot } from '@/lib/capture';
+import { captureScreenshot, pumpCaptureQueue } from '@/lib/capture';
 import { validateSafeUrl } from '@/lib/ssrf';
 import { config } from '@/lib/config';
 
@@ -18,6 +18,12 @@ export async function GET(request: NextRequest) {
     const offset = searchParams.get('offset') ? Number(searchParams.get('offset')) : undefined;
 
     const bookmarks = getBookmarks({ query, tag, status, view, folderId, sortBy, limit, offset });
+
+    // The queue lives in the database, so any read is a chance to notice work that nothing has
+    // picked up yet — an import or seed script never goes through the POST path.
+    if (bookmarks.some((b) => b.capture_status === 'pending')) {
+      void pumpCaptureQueue().catch(() => {});
+    }
     const tags = getAllTags();
     const folders = getAllFolders();
     const counts = getViewCounts();

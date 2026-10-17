@@ -15,6 +15,10 @@ interface HeaderProps {
   onToast?: (msg: string, type: 'success' | 'error' | 'loading') => void;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
   urlInputRef?: React.RefObject<HTMLInputElement | null>;
+  /** Bookmarks still waiting for a screenshot slot. */
+  pendingCaptures?: number;
+  /** Bookmarks being rendered right now. */
+  capturingNow?: number;
 }
 
 export function Header({
@@ -27,6 +31,8 @@ export function Header({
   onToast,
   searchInputRef,
   urlInputRef,
+  pendingCaptures = 0,
+  capturingNow = 0,
 }: HeaderProps) {
   // Keyboard hints are meaningless on a touch keyboard, so they only appear
   // where a physical keyboard is likely.
@@ -138,6 +144,26 @@ export function Header({
             addOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
         />
+
+        {/* Queue progress. A bare "Queued..." on the card says nothing about how far along
+            the queue is, so the counts live here, where the eye already is while waiting. */}
+        {pendingCaptures + capturingNow > 0 && (
+          <div
+            aria-live="polite"
+            title="Screenshots are rendering in the background"
+            className="flex items-center gap-2 px-3 h-9 lg:h-[34px] rounded-lg bg-zinc-100 text-xs font-medium text-zinc-600 shrink-0"
+          >
+            <span className="w-3.5 h-3.5 border-2 border-emerald-500/20 border-t-emerald-600 rounded-full animate-spin shrink-0" />
+            <span className="tabular-nums whitespace-nowrap">
+              {capturingNow > 0 ? `${capturingNow} capturing` : 'Starting'}
+            </span>
+            {pendingCaptures > 0 && (
+              <span className="text-zinc-400 tabular-nums whitespace-nowrap">
+                {pendingCaptures} queued
+              </span>
+            )}
+          </div>
+        )}
 
         <form
           onSubmit={handleSubmit}

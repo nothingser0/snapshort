@@ -358,10 +358,12 @@ export function Sidebar({
           <div className="space-y-2 flex flex-col min-h-0 flex-1 max-h-fit lg:flex-none lg:shrink-0">
             <div className="flex items-center justify-between px-2 text-[11px] pointer-coarse:text-xs font-semibold text-zinc-400 uppercase tracking-wider">
               <span>Collections</span>
-              <div className="flex items-center gap-0.5">
+              {/* Tight cluster: 44px touch targets that overlap by a few pixels, so the
+                  icons sit close together without shrinking the tap area. */}
+              <div className="-mr-1.5 flex items-center gap-0 pointer-coarse:-mr-2.5">
                 <button
                   onClick={() => setSortFoldersByCount((on) => !on)}
-                  className={`p-1 rounded transition-colors cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
+                  className={`p-1 rounded transition-colors cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:-mx-1.5 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                     sortFoldersByCount
                       ? 'text-zinc-900'
                       : 'text-zinc-400 hover:text-zinc-800'
@@ -383,7 +385,7 @@ export function Sidebar({
                     setIsCreatingFolder(true);
                     setActiveParentFolderId(null);
                   }}
-                  className="p-1 hover:text-zinc-800 transition-colors cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25"
+                  className="p-1 hover:text-zinc-800 transition-colors cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:-mx-1.5 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25"
                   title="New Top-Level Collection"
                 >
                   <FolderPlus className="w-3.5 h-3.5" />
@@ -483,6 +485,7 @@ export function Sidebar({
                         {...dragOverProps(folder.id)}
                         onClick={(e) => {
                           const row = e.currentTarget;
+                          onSelectView('all');
                           onSelectFolder(isSelected ? null : folder.id);
                           // On touch the list opens below the fold, so bring it
                           // into view; otherwise the subcollections stay unseen.
@@ -531,14 +534,16 @@ export function Sidebar({
                             </span>
                           )}
                           {/* Folder Action triggers on hover */}
-                          <div className="hidden group-hover/folder:flex pointer-coarse:flex items-center gap-1 pointer-coarse:gap-0.5">
+                          {/* Overlapping 44px targets: the icons read as one tight group
+                              while each button keeps a full tap area. */}
+                          <div className="-mr-1.5 hidden group-hover/folder:flex pointer-coarse:flex items-center gap-1 pointer-coarse:-mr-2.5 pointer-coarse:gap-0">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setIsCreatingFolder(true);
                                 setActiveParentFolderId(folder.id);
                               }}
-                              className="p-0.5 pointer-coarse:p-2.5 pointer-coarse:-mx-0.5 hover:text-emerald-600"
+                              className="p-0.5 pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:-mx-2 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center hover:text-emerald-600"
                               title="Add subfolder"
                             >
                               <FolderPlus className="w-3 h-3" />
@@ -549,7 +554,7 @@ export function Sidebar({
                                 setEditingFolderId(folder.id);
                                 setEditFolderName(folder.name);
                               }}
-                              className="p-0.5 pointer-coarse:p-2.5 pointer-coarse:-mx-0.5 hover:text-zinc-800"
+                              className="p-0.5 pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:-mx-2 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center hover:text-zinc-800"
                               title="Rename"
                             >
                               <Edit2 className="w-3 h-3" />
@@ -559,7 +564,7 @@ export function Sidebar({
                                 e.stopPropagation();
                                 onRequestDeleteFolder(folder.id, folder.name);
                               }}
-                              className="p-0.5 pointer-coarse:p-2.5 pointer-coarse:-mx-0.5 hover:text-red-600"
+                              className="p-0.5 pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:-mx-2 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center hover:text-red-600"
                               title="Delete"
                             >
                               <Trash className="w-3 h-3" />
@@ -586,11 +591,12 @@ export function Sidebar({
                                 key={sub.id}
                                 data-flip-key={sub.id}
                                 {...dragOverProps(sub.id)}
-                                onClick={() =>
+                                onClick={() => {
+                                  onSelectView('all');
                                   onSelectFolder(
                                     selectedFolderId === sub.id ? null : sub.id
-                                  )
-                                }
+                                  );
+                                }}
                                 className={`flex items-center justify-between px-2.5 py-1 relative rounded-md text-[11px] font-medium cursor-pointer pointer-coarse:min-h-11 pointer-coarse:text-xs group/sub focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                                   selectedFolderId === sub.id
                                     ? 'bg-zinc-900 text-white font-semibold'
@@ -615,13 +621,13 @@ export function Sidebar({
                                       {sub.count}
                                     </span>
                                   )}
-                                  <div className="hidden group-hover/sub:flex pointer-coarse:flex items-center gap-1 pointer-coarse:gap-0.5">
+                                  <div className="-mr-1 hidden group-hover/sub:flex pointer-coarse:flex items-center gap-1 pointer-coarse:-mr-2 pointer-coarse:gap-0">
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         onRequestDeleteFolder(sub.id, sub.name);
                                       }}
-                                      className="p-0.5 pointer-coarse:p-2.5 pointer-coarse:-mx-0.5 hover:text-red-600"
+                                      className="p-0.5 pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:-mx-2 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center hover:text-red-600"
                                     >
                                       <Trash className="w-2.5 h-2.5" />
                                     </button>
@@ -648,7 +654,7 @@ export function Sidebar({
               </div>
               <button
                 onClick={() => setSortTagsByCount((on) => !on)}
-                className={`p-1 rounded transition-colors cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
+                className={`p-1 rounded transition-colors cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:-mx-2 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                   sortTagsByCount
                     ? 'text-zinc-900'
                     : 'text-zinc-400 hover:text-zinc-800'
@@ -680,7 +686,10 @@ export function Sidebar({
                     <button
                       key={t.id}
                       data-flip-key={t.id}
-                      onClick={() => onSelectTag(isSelected ? null : t.name)}
+                      onClick={() => {
+                        onSelectView('all');
+                        onSelectTag(isSelected ? null : t.name);
+                      }}
                       className={`px-2.5 py-1 pointer-coarse:min-h-11 pointer-coarse:px-3 rounded-full text-[11px] pointer-coarse:text-xs font-medium border transition-colors cursor-pointer whitespace-nowrap inline-flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/25 ${
                         isSelected ? TAG_PILL_SELECTED_CLASS : TAG_PILL_CLASS
                       }`}

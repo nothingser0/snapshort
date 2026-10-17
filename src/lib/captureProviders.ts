@@ -2,6 +2,7 @@ import { chromium, type Browser, type Page } from 'playwright';
 import path from 'node:path';
 import fs from 'node:fs';
 import { config } from './config';
+import { isBlankImage } from './blankImage';
 
 const SCREENSHOT_DIR = path.join(process.cwd(), 'public', 'screenshots');
 
@@ -169,8 +170,10 @@ async function renderWithBrowser(request: CaptureRequest): Promise<CaptureResult
       })
       .catch(() => {});
 
-    await page.waitForLoadState('load', { timeout: 10000 }).catch(() => {});
-    await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {});
+    // Bounded waits: a chatty page never reaches networkidle, and every extra second here is
+    // a second the API slots never get.
+    await page.waitForLoadState('load', { timeout: 6000 }).catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 2500 }).catch(() => {});
 
     // Decode images and fonts so text does not reflow under the shot.
     await withTimeout(
@@ -195,7 +198,7 @@ async function renderWithBrowser(request: CaptureRequest): Promise<CaptureResult
     ).catch(() => {});
 
     // Layout stabilisation before the shot.
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     const title = await readPageTitle(page, request.url);
     const description = await readDescription(page);
@@ -206,6 +209,17 @@ async function renderWithBrowser(request: CaptureRequest): Promise<CaptureResult
       quality: 80,
       fullPage: false,
     });
+
+    if (config.captureRejectBlank) {
+      const bytes = fs.readFileSync(targetFilePath);
+      const check = await isBlankImage(bytes, 'image/webp');
+      if (check.blank) {
+        fs.rmSync(targetFilePath, { force: true });
+        throw new Error(
+          `Screenshot is blank (${Math.round(check.whiteRatio * 100)}% white)`,
+        );
+      }
+    }
 
     return {
       success: true,
@@ -229,7 +243,9 @@ async function renderWithBrowser(request: CaptureRequest): Promise<CaptureResult
 async function renderWithBrowserGuarded(
   request: CaptureRequest,
 ): Promise<CaptureResult> {
-  const budget = request.timeoutMs + 15000;
+  // Tight budget: a local render that has not produced an image by now is unlikely to, and
+  // holding the slot starves the API fallbacks of their share of the deadline.
+  const budget = request.timeoutMs + 6000;
   return withTimeout(renderWithBrowser(request), budget, 'Capture');
 }
 
@@ -256,14 +272,31 @@ interface ApiSlot {
   name: 'thum' | 'sb';
   url: string;
   key: string;
-  /** Whether the slot can return page metadata next to the image. */
-  supportsMetadata: boolean;
+  /** Whether `{url}` must be left unencoded (path-style services like thum.io). */
+  rawUrl: boolean;
+}
+
+/**
+ * Per-slot spacing.
+ *
+ * Free API tiers rate-limit per minute, and the queue would otherwise fire as fast as the
+ * limiter allows. Each slot records when its last call started and waits out the gap.
+ */
+const lastCallAt: Record<string, number> = {};
+
+async function respectRateLimit(slotName: string): Promise<void> {
+  const gap = config.captureApiMinIntervalMs;
+  if (gap <= 0) return;
+  const previous = lastCallAt[slotName] ?? 0;
+  const wait = previous + gap - Date.now();
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastCallAt[slotName] = Date.now();
 }
 
 function slotFor(provider: 'thum' | 'sb'): ApiSlot {
   return provider === 'thum'
-    ? { name: 'thum', url: config.thumUrl, key: config.thumKey, supportsMetadata: false }
-    : { name: 'sb', url: config.sbUrl, key: config.sbKey, supportsMetadata: true };
+    ? { name: 'thum', url: config.thumUrl, key: config.thumKey, rawUrl: true }
+    : { name: 'sb', url: config.sbUrl, key: config.sbKey, rawUrl: false };
 }
 
 function buildApiUrl(
@@ -271,8 +304,11 @@ function buildApiUrl(
   request: CaptureRequest,
 ): { url: string; sendKeyAsHeader: boolean } {
   const hasKeyPlaceholder = slot.url.includes('{key}');
+  // thum.io takes the target URL as a raw path segment and answers 400 to a percent-encoded
+  // one; screenshotbase expects a query parameter and needs the encoding. The slot decides.
+  const target = slot.rawUrl ? request.url : encodeURIComponent(request.url);
   let url = slot.url
-    .replace(/\{url\}/g, encodeURIComponent(request.url))
+    .replace(/\{url\}/g, target)
     .replace(/\{width\}/g, String(request.viewportWidth))
     .replace(/\{height\}/g, String(request.viewportHeight));
 
@@ -281,6 +317,21 @@ function buildApiUrl(
   }
 
   return { url, sendKeyAsHeader: !hasKeyPlaceholder };
+}
+
+/**
+ * Removes any previously written image for this bookmark.
+ *
+ * The extension follows the provider that produced the file (thum.io returns PNG,
+ * screenshotbase returns WebP), so a retry through a different slot would otherwise leave the
+ * old file behind and slowly fill the disk with captures nothing points at.
+ */
+function removeExistingImages(bookmarkId: string): void {
+  for (const extension of Object.values(EXTENSIONS)) {
+    fs.rmSync(path.join(SCREENSHOT_DIR, `${bookmarkId}.${extension}`), {
+      force: true,
+    });
+  }
 }
 
 async function writeImage(
@@ -298,6 +349,7 @@ async function writeImage(
     throw new Error('Screenshot service returned an empty image');
   }
 
+  removeExistingImages(bookmarkId);
   const filename = `${bookmarkId}.${extension}`;
   fs.writeFileSync(path.join(SCREENSHOT_DIR, filename), bytes);
   return `/screenshots/${filename}`;
@@ -320,9 +372,13 @@ async function renderWithApiSlot(
   const headers: Record<string, string> = {};
   if (sendKeyAsHeader && slot.key) headers.apikey = slot.key;
 
+  await respectRateLimit(slot.name);
+
   const response = await fetch(url, {
     headers,
-    signal: AbortSignal.timeout(config.captureApiTimeoutMs),
+    signal: AbortSignal.timeout(
+      Math.min(config.captureApiTimeoutMs, config.captureDeadlineMs),
+    ),
   });
 
   if (!response.ok) {
@@ -373,11 +429,18 @@ async function renderWithApiSlot(
     };
   }
 
-  const screenshotPath = await writeImage(
-    request.bookmarkId,
-    Buffer.from(await response.arrayBuffer()),
-    contentType,
-  );
+  const bytes = Buffer.from(await response.arrayBuffer());
+
+  if (config.captureRejectBlank) {
+    const check = await isBlankImage(bytes, contentType);
+    if (check.blank) {
+      throw new Error(
+        `Screenshot is blank (${Math.round(check.whiteRatio * 100)}% white)`,
+      );
+    }
+  }
+
+  const screenshotPath = await writeImage(request.bookmarkId, bytes, contentType);
 
   return {
     success: true,
@@ -405,13 +468,27 @@ export async function renderScreenshot(
   }
 
   const failures: string[] = [];
+  const deadline = Date.now() + config.captureDeadlineMs;
 
   for (const provider of chain) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      failures.push(`${provider}: skipped, deadline reached`);
+      continue;
+    }
+
     try {
-      const result =
+      // Each provider gets at most the remaining budget. A slow renderer is cut off so the
+      // next one still has time, and the whole capture can never exceed the deadline.
+      const attempt =
         provider === 'local'
-          ? await renderWithBrowserGuarded(request)
-          : await renderWithApiSlot(provider, request);
+          ? renderWithBrowserGuarded({
+              ...request,
+              timeoutMs: Math.min(request.timeoutMs, remaining),
+            })
+          : renderWithApiSlot(provider, request);
+
+      const result = await withTimeout(attempt, remaining, provider);
       if (result.success) return result;
       failures.push(`${provider}: ${result.error || 'failed'}`);
     } catch (err: unknown) {

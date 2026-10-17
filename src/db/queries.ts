@@ -370,6 +370,24 @@ export function getAllFolders() {
  * the moment they are created. Both therefore describe work that is lost after a restart, and
  * a row in either state renders as a spinner that never resolves.
  */
+/**
+ * Every bookmark whose capture has not settled yet.
+ *
+ * This is what the queue drains. It covers rows created by a script or an import (which never
+ * passed through the API and so were never queued), rows interrupted by a restart, and rows
+ * whose capture was lost. The queue re-reads it on each pass, so nothing can be forgotten.
+ */
+export function getUnsettledCaptures(): Array<{ id: string; url: string }> {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT id, url FROM bookmarks
+       WHERE capture_status IN ('pending', 'capturing')
+       ORDER BY created_at ASC`,
+    )
+    .all() as Array<{ id: string; url: string }>;
+}
+
 export function getStalledCaptures(olderThanMs: number): Array<{ id: string; url: string }> {
   const db = getDb();
   const cutoff = Date.now() - olderThanMs;

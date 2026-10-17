@@ -413,7 +413,7 @@ export function BentoGrid({
   ) : (
     /* UNIFORM GRID: 3 columns x 2 rows = 6 identical cards, every card 1x1 */
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:flex-1 lg:min-h-0 lg:[grid-template-rows:repeat(2,minmax(0,1fr))]">
-      {bookmarks.slice(0, 6).map((b) => renderCard(b))}
+      {bookmarks.map((b) => renderCard(b))}
     </div>
   );
 
@@ -466,11 +466,17 @@ export function BentoGrid({
             </button>
 
             {paginationItems.map((p, idx) => {
+              const itemKey =
+                p === '...'
+                  ? idx <= 2 ? 'ellipsis-left' : 'ellipsis-right'
+                  : `page-${p}`;
+
               if (p === '...') {
                 return (
                   <span
-                    key={`ellipsis-${idx}`}
-                    className="w-5 text-center text-xs font-bold text-zinc-400"
+                    key={itemKey}
+                    aria-hidden
+                    className="w-7 h-7 flex items-center justify-center text-xs font-bold text-zinc-400 select-none tracking-wider shrink-0"
                   >
                     ...
                   </span>
@@ -478,12 +484,15 @@ export function BentoGrid({
               }
               return (
                 <button
-                  key={p}
+                  key={itemKey}
                   onClick={() => onPageChange(Number(p))}
-                  className={`w-7 h-7 rounded-full text-xs font-bold transition-all duration-150 ease-out active:scale-95 cursor-pointer ${
+                  aria-current={currentPage === p ? 'page' : undefined}
+                  /* The border is always drawn, transparent when inactive: adding it on
+                     hover would make the row grow by a pixel and shift every neighbour. */
+                  className={`w-7 h-7 shrink-0 flex items-center justify-center rounded-full text-xs font-bold tabular-nums border transition-all duration-150 ease-out active:scale-95 cursor-pointer ${
                     currentPage === p
-                      ? 'bg-zinc-900 text-white shadow-2xs'
-                      : 'bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50'
+                      ? 'bg-zinc-900 text-white border-zinc-900 shadow-2xs'
+                      : 'bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50'
                   }`}
                 >
                   {p}

@@ -102,6 +102,15 @@ export const config = {
   captureTimeoutMs: intFromEnv('CAPTURE_TIMEOUT_MS', 30000, 5000, 120000),
 
   /**
+   * Hard ceiling for one bookmark across the whole provider chain, in milliseconds.
+   *
+   * The chain is not allowed to exceed this: a slow local render is cut off and the next
+   * provider takes over with whatever budget is left. Past this point the capture fails
+   * rather than holding a queue slot, so the rest of the queue keeps moving.
+   */
+  captureDeadlineMs: intFromEnv('CAPTURE_DEADLINE_MS', 60000, 10000, 300000),
+
+  /**
    * How long a Chromium launch may take before it is treated as a failure. Without this a
    * failed launch can hang a queue slot forever, which surfaces as a card stuck on
    * "Capturing preview...".
@@ -139,8 +148,30 @@ export const config = {
   ),
   sbKey: stringFromEnv('CAPTURE_SB_KEY', ''),
 
-  /** Hard ceiling on one API capture, in milliseconds. */
-  captureApiTimeoutMs: intFromEnv('CAPTURE_API_TIMEOUT_MS', 60000, 5000, 120000),
+  /**
+   * Minimum gap between two calls to the same API slot, in milliseconds.
+   *
+   * Free tiers rate-limit per minute, and a burst of captures otherwise burns the quota on
+   * 429s. Requests are serialised per slot with this spacing.
+   */
+  captureApiMinIntervalMs: intFromEnv('CAPTURE_API_MIN_INTERVAL_MS', 2000, 0, 60000),
+
+  /**
+   * Reject a capture whose image is (nearly) blank.
+   *
+   * Some pages render an empty body to a headless browser — a consent wall that never
+   * painted, or a client-side app that needs a login. Saving that image looks like success
+   * and shows a white card, so it is treated as a failure and the next provider is tried.
+   */
+  captureRejectBlank: boolFromEnv('CAPTURE_REJECT_BLANK', true),
+
+  /**
+   * Hard ceiling on one API capture, in milliseconds.
+   *
+   * Kept below the chain deadline so the last provider still gets a real chance: with a 60s
+   * deadline, a 20s API ceiling leaves room for a local attempt and two API slots.
+   */
+  captureApiTimeoutMs: intFromEnv('CAPTURE_API_TIMEOUT_MS', 20000, 5000, 120000),
 
   /**
    * Ask the screenshot service for page metadata (title, description) as well as the image.
