@@ -50,7 +50,7 @@ recognition — the layout, the logo, the hero image — the way you find a tab 
 The same app, re-laid out: an off-canvas drawer, a single scrolling column, and a bottom sheet for
 adding a link.
 
-<center?
+<center>
 <p>
   <img src="docs/images/app-mobile.webp" alt="Snapshort on a phone" width="330">
   &nbsp;&nbsp;
