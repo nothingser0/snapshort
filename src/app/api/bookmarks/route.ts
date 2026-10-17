@@ -3,6 +3,7 @@ import { getBookmarks, createBookmark, getAllTags, getAllFolders, getViewCounts,
 import { getDb } from '@/db/index';
 import { captureScreenshot } from '@/lib/capture';
 import { validateSafeUrl } from '@/lib/ssrf';
+import { config } from '@/lib/config';
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,7 +22,14 @@ export async function GET(request: NextRequest) {
     const folders = getAllFolders();
     const counts = getViewCounts();
 
-    return NextResponse.json({ bookmarks, tags, folders, counts });
+    // `captureEnabled` lets the client hide retry affordances that cannot work here.
+    return NextResponse.json({
+      bookmarks,
+      tags,
+      folders,
+      counts,
+      captureEnabled: config.captureEnabled,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to fetch bookmarks';
     return NextResponse.json({ error: message }, { status: 500 });

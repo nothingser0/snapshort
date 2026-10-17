@@ -14,6 +14,7 @@ import {
   Archive,
 } from 'lucide-react';
 import { FIELD_CLASS } from '@/lib/ui';
+import { displayCaptureStatus } from '@/lib/captureStatus';
 
 /** Fades content in when it mounts, so new pages and views settle instead of snapping. */
 function FadeIn({
@@ -44,6 +45,8 @@ function FadeIn({
 interface BentoGridProps {
   bookmarks: BookmarkWithTags[];
   loading: boolean;
+  /** False on deployments without Chromium: retry would be a dead end. */
+  captureEnabled?: boolean;
   currentPage: number;
   totalPages: number;
   onPageChange: (page: number) => void;
@@ -70,6 +73,7 @@ export function BentoGrid({
   onSelectBookmark,
   onOpenExternal,
   onRetryCapture,
+  captureEnabled = true,
   onToggleFavorite,
   onRestoreFromTrash,
   onToggleArchive,
@@ -138,6 +142,11 @@ export function BentoGrid({
 
   // UNIFORM CARD RENDERER: every card is exactly the same size (1 column x 1 row)
   const renderCard = (b: BookmarkWithTags) => {
+    // Capture can be switched off after rows were queued; those would spin forever.
+    const cardCaptureStatus = displayCaptureStatus(
+      b.capture_status,
+      captureEnabled,
+    );
     const isDeleted = b.is_deleted === 1;
     const isFav = b.is_favorite === 1;
 
@@ -183,7 +192,7 @@ export function BentoGrid({
       >
         {/* Viewport Screenshot */}
         <div className="w-full aspect-[16/10] lg:aspect-auto lg:flex-1 lg:min-h-0 bg-zinc-100 relative border-b border-zinc-100 flex items-center justify-center overflow-hidden">
-          {b.capture_status === 'ready' && b.screenshot_path ? (
+          {cardCaptureStatus === 'ready' && b.screenshot_path ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={b.screenshot_path}
@@ -194,11 +203,16 @@ export function BentoGrid({
               decoding="sync"
               className="w-full h-full object-cover object-top transition duration-400 ease-out group-hover:scale-[1.04]"
             />
-          ) : b.capture_status === 'capturing' ? (
+          ) : cardCaptureStatus === 'capturing' ||
+            cardCaptureStatus === 'pending' ? (
             <div className="flex flex-col items-center justify-center gap-1.5 p-3 text-center">
               <div className="w-4 h-4 border-2 border-emerald-500/20 border-t-emerald-600 rounded-full animate-spin" />
+              {/* A queued capture is not the same as a running one; saying so stops a burst
+                  of adds from looking like five hung captures. */}
               <span className="text-[10px] pointer-coarse:text-xs text-zinc-500 font-medium">
-                Capturing preview...
+                {cardCaptureStatus === 'pending'
+                  ? 'Queued...'
+                  : 'Capturing preview...'}
               </span>
             </div>
           ) : (
@@ -206,9 +220,11 @@ export function BentoGrid({
               <div className="w-7 h-7 rounded-xl bg-white border border-zinc-200 flex items-center justify-center text-zinc-400 shadow-2xs">
                 <Globe className="w-4 h-4" />
               </div>
+              {/* Capture off is a deployment choice, not a failure: say so plainly rather
+                  than leaving a card that looks like it is still loading. */}
               <span className="inline-flex items-center gap-1 text-[10px] pointer-coarse:text-xs text-zinc-400 font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-zinc-300" />
-                <span>Offline</span>
+                <span>{cardCaptureStatus === 'disabled' ? 'No preview' : 'Offline'}</span>
               </span>
             </div>
           )}
@@ -317,16 +333,18 @@ export function BentoGrid({
                   >
                     <Archive className="w-3 h-3" />
                   </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRetryCapture(b.id, e);
-                    }}
-                    className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
-                    title="Retry Screenshot"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                  </button>
+                  {captureEnabled && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRetryCapture(b.id, e);
+                      }}
+                      className="p-1 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-all duration-150 ease-out active:scale-90 cursor-pointer pointer-coarse:min-w-11 pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
+                      title="Retry Screenshot"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                    </button>
+                  )}
                 </>
               )}
               <button

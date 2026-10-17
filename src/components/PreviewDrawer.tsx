@@ -17,6 +17,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { FIELD_CLASS } from '@/lib/ui';
+import { displayCaptureStatus } from '@/lib/captureStatus';
 
 interface PreviewDrawerProps {
   bookmark: BookmarkWithTags | null;
@@ -40,6 +41,8 @@ interface PreviewDrawerProps {
   folders?: Array<{ id: string; name: string; parent_id?: string | null }>;
   /** Drives the enter/exit transition; the parent keeps the drawer mounted while false. */
   active?: boolean;
+  /** False on deployments without Chromium: no retry button, and the message says so. */
+  captureEnabled?: boolean;
 }
 
 export function PreviewDrawer({
@@ -53,6 +56,7 @@ export function PreviewDrawer({
   onVisit,
   folders = [],
   active = true,
+  captureEnabled = true,
 }: PreviewDrawerProps) {
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
@@ -248,8 +252,10 @@ export function PreviewDrawer({
             {/* Left: Screenshot Preview */}
             <div className="space-y-3">
               <div className="w-full aspect-[16/10] rounded-2xl overflow-hidden bg-zinc-100 border border-zinc-200/70 relative">
-                {bookmark.capture_status === 'ready' &&
-                bookmark.screenshot_path ? (
+                {displayCaptureStatus(
+                  bookmark.capture_status,
+                  captureEnabled,
+                ) === 'ready' && bookmark.screenshot_path ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={bookmark.screenshot_path}
@@ -260,12 +266,17 @@ export function PreviewDrawer({
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-center space-y-3 px-6">
                     <AlertCircle className="w-9 h-9 text-zinc-400 mx-auto" />
                     <p className="text-xs font-semibold text-zinc-500">
-                      {bookmark.capture_status === 'failed'
-                        ? bookmark.capture_error ||
-                          'Screenshot generation failed'
-                        : 'Screenshot is generating...'}
+                      {displayCaptureStatus(
+                        bookmark.capture_status,
+                        captureEnabled,
+                      ) === 'disabled'
+                        ? 'Preview capture is turned off on this server'
+                        : bookmark.capture_status === 'failed'
+                          ? bookmark.capture_error ||
+                            'Screenshot generation failed'
+                          : 'Screenshot is generating...'}
                     </p>
-                    {bookmark.capture_status === 'failed' && (
+                    {bookmark.capture_status === 'failed' && captureEnabled && (
                       <button
                         type="button"
                         onClick={(e) => onRetry(bookmark.id, e)}
@@ -460,13 +471,15 @@ export function PreviewDrawer({
               <span>Delete</span>
             </button>
 
-            <button
-              onClick={(e) => onRetry(bookmark.id, e)}
-              className="px-3.5 py-2 sm:py-1.5 pointer-coarse:min-h-11 bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Re-capture</span>
-            </button>
+            {captureEnabled && (
+              <button
+                onClick={(e) => onRetry(bookmark.id, e)}
+                className="px-3.5 py-2 sm:py-1.5 pointer-coarse:min-h-11 bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Re-capture</span>
+              </button>
+            )}
           </div>
 
           <span className="hidden lg:inline text-[11px] font-medium text-zinc-400">

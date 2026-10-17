@@ -165,8 +165,10 @@ already active and no transition runs at all.
 |---|---|
 | First load | Skeleton cards mirroring the real card anatomy (screenshot area, title, description, tag pills, footer) |
 | Empty | Snapshort logo, "No Bookmarks Found", one line of guidance |
+| Queued | Spinner with "Queued..." — the capture is waiting for a free slot |
 | Capturing | Spinner with "Capturing preview..." in the screenshot area |
 | Failed capture | Globe icon, "Offline", retry available from the card and the editor |
+| Capture off | Globe icon, "No preview"; no retry affordance |
 | Trash | Cards keep all actions; delete becomes permanent after confirmation |
 
 ## Editor panel

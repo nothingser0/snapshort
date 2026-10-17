@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBookmarkById } from '@/db/queries';
 import { captureScreenshot } from '@/lib/capture';
+import { config } from '@/lib/config';
 
 export async function POST(
   _request: NextRequest,
@@ -11,6 +12,15 @@ export async function POST(
     const bookmark = getBookmarkById(id);
     if (!bookmark) {
       return NextResponse.json({ error: 'Bookmark not found' }, { status: 404 });
+    }
+
+    // Retrying cannot work when this deployment has capture turned off; say why instead of
+    // accepting the request and leaving the card spinning.
+    if (!config.captureEnabled) {
+      return NextResponse.json(
+        { error: 'Screenshot capture is disabled on this server' },
+        { status: 409 },
+      );
     }
 
     // Trigger capture in background

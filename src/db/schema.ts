@@ -6,7 +6,7 @@ export interface Bookmark {
   description: string | null;
   favicon_url: string | null;
   screenshot_path: string | null;
-  capture_status: 'pending' | 'capturing' | 'ready' | 'failed';
+  capture_status: 'pending' | 'capturing' | 'ready' | 'failed' | 'disabled';
   capture_error: string | null;
   is_favorite?: number;
   is_archived?: number;

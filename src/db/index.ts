@@ -48,6 +48,14 @@ export function getDb(): Database.Database {
   // database files still carry it, so drop it to match the schema.
   runMigration('ALTER TABLE bookmarks DROP COLUMN is_pinned');
 
+  // First query of the process: settle anything the previous process left mid-flight. Deferred
+  // so this module stays dependency-free (capture imports queries, which imports this).
+  queueMicrotask(() => {
+    void import('../lib/capture')
+      .then((mod) => mod.reconcileCaptureStateOnce())
+      .catch(() => {});
+  });
+
   return dbInstance;
 }
 

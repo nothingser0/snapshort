@@ -13,16 +13,20 @@
 
 1. **SSRF guard first.** Every URL is validated before Playwright navigates. Never weaken
    `src/lib/ssrf.ts` or move the check after navigation.
-2. **Cap concurrency at 2 browser contexts** (`p-limit` in `src/lib/capture.ts`). Higher caps
-   spike memory and stall the app.
-3. **One SQLite file** `snapshort.db` in WAL mode, schema created on first connection.
+2. **Cap local concurrency at 2 browser contexts.** `src/lib/capture.ts` clamps the `local`
+   provider to two regardless of `CAPTURE_CONCURRENCY`; higher caps spike memory and stall the
+   app. The `api` provider renders elsewhere and may run wider.
+3. **Every capture path must settle its row.** `pending` and `capturing` are claims held by a
+   running process; a path that throws without writing `ready`/`failed` leaves a card spinning
+   with no way out. See `captureScreenshot` and the boot recovery in `reconcileCaptureStateOnce`.
+4. **One SQLite file** `snapshort.db` in WAL mode, schema created on first connection.
    Migrations are additive statements in `src/db/index.ts` wrapped in `runMigration`.
-4. **Colour carries meaning.** Emerald = primary action, success and recovery. Red =
+5. **Colour carries meaning.** Emerald = primary action, success and recovery. Red =
    destructive. Amber = in progress. Everything else is zinc. Do not introduce decorative
    hues (no per-tag rainbow, no coloured card variants).
-5. **Do not fade content on view switches.** Selection changes are instant; only hover and
+6. **Do not fade content on view switches.** Selection changes are instant; only hover and
    press states animate. See `docs/DESIGN.md` for the full motion table and the reasoning.
-6. **The app fits 1920×1080 with no page scrollbar.** Six uniform cards per page.
+7. **The app fits 1920×1080 with no page scrollbar.** Six uniform cards per page.
 
 ## Before changing visual code
 
@@ -39,6 +43,22 @@ bun scripts/seed.ts        # optional: sample data; deletes existing rows first
 ```
 
 Run the app and exercise the changed path — types and lint do not prove the UI works.
+
+**Drive the UI with the built-in `browser` object in eval, not Playwright.** The project's
+`playwright` dependency belongs to `src/lib/capture.ts` (screenshots); it is not the test
+harness. `browser.open()` starts a managed Chromium with nothing to install:
+
+```js
+const tab = await browser.open({ name: 'snapshort', url: 'http://localhost:3000', viewport: { width: 390, height: 664 } });
+await tab.click('button[aria-label="Open navigation"]');
+await tab.styles('header input[placeholder*="Search"]', ['font-size', 'border-width']);
+await tab.emulate({ device: 'iPhone 13' });   // then tab.reload()
+await tab.errors();
+await tab.close();
+```
+
+Prefer `tab.evaluate` for geometry and computed styles, `tab.styles` for one property, and
+`tab.screenshot` for a visual check. Reset the DB and delete temporary screenshots afterwards.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

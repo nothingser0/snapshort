@@ -1,4 +1,5 @@
 import { getDb } from './index';
+import { config } from '../lib/config';
 import type { Bookmark, Tag, BookmarkWithTags } from './schema';
 import crypto from 'node:crypto';
 
@@ -48,6 +49,10 @@ export function createBookmark(input: CreateBookmarkInput): BookmarkWithTags {
     }
   };
   const title = input.title?.trim() || formatFallbackTitle(cleanUrl);
+  // With capture off there is nothing to wait for, so the row is born settled.
+  const initialCaptureStatus: Bookmark['capture_status'] = config.captureEnabled
+    ? 'pending'
+    : 'disabled';
 
   const insertBookmark = db.prepare(`
     INSERT INTO bookmarks (
@@ -55,7 +60,7 @@ export function createBookmark(input: CreateBookmarkInput): BookmarkWithTags {
       capture_status, created_at, updated_at
     ) VALUES (
       ?, ?, ?, ?, ?, ?,
-      'pending', ?, ?
+      ?, ?, ?
     )
   `);
 
@@ -79,6 +84,7 @@ export function createBookmark(input: CreateBookmarkInput): BookmarkWithTags {
       title,
       input.description || null,
       input.favicon_url || null,
+      initialCaptureStatus,
       now,
       now
     );
@@ -103,7 +109,7 @@ export function createBookmark(input: CreateBookmarkInput): BookmarkWithTags {
       description: input.description || null,
       favicon_url: input.favicon_url || null,
       screenshot_path: null,
-      capture_status: 'pending' as const,
+      capture_status: initialCaptureStatus,
       capture_error: null,
       created_at: now,
       updated_at: now,
@@ -356,4 +362,41 @@ export function getAllFolders() {
     GROUP BY f.id
     ORDER BY f.name COLLATE NOCASE ASC
   `).all();
+}
+/**
+ * Captures that no process is working on any more.
+ *
+ * `capturing` is only ever set by a running process, and `pending` rows are only picked up at
+ * the moment they are created. Both therefore describe work that is lost after a restart, and
+ * a row in either state renders as a spinner that never resolves.
+ */
+export function getStalledCaptures(olderThanMs: number): Array<{ id: string; url: string }> {
+  const db = getDb();
+  const cutoff = Date.now() - olderThanMs;
+  return db
+    .prepare(
+      `SELECT id, url FROM bookmarks
+       WHERE capture_status IN ('pending', 'capturing')
+         AND updated_at < ?
+       ORDER BY created_at ASC`,
+    )
+    .all(cutoff) as Array<{ id: string; url: string }>;
+}
+
+/**
+ * Marks interrupted work as failed instead of requeueing it.
+ *
+ * Used when capture is switched off: the rows would otherwise stay `pending` forever, and a
+ * card that says "Capturing preview..." on a server that will never capture anything is a lie.
+ */
+export function failStalledCaptures(reason: string): number {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `UPDATE bookmarks
+       SET capture_status = 'failed', capture_error = ?, updated_at = ?
+       WHERE capture_status IN ('pending', 'capturing')`,
+    )
+    .run(reason, Date.now());
+  return result.changes;
 }

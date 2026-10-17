@@ -27,6 +27,8 @@ interface ToastState {
 
 export default function HomePage() {
   const [bookmarks, setBookmarks] = useState<BookmarkWithTags[]>([]);
+  /** Whether this deployment renders screenshots; hides retry affordances when false. */
+  const [captureEnabled, setCaptureEnabled] = useState(true);
   const [folders, setFolders] = useState<FolderOption[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [activeView, setActiveView] = useState<MainView>('all');
@@ -92,6 +94,7 @@ export default function HomePage() {
         const data = await res.json();
         const fetchedBookmarks: BookmarkWithTags[] = data.bookmarks || [];
         setBookmarks(fetchedBookmarks);
+        setCaptureEnabled(data.captureEnabled !== false);
         setTags(data.tags || []);
         setFolders(data.folders || []);
 
@@ -120,6 +123,21 @@ export default function HomePage() {
       void fetchBookmarks();
     });
   }, [fetchBookmarks]);
+
+  // Captures finish in the background, after the fetch that followed the save. Without this
+  // the grid keeps showing "Capturing preview..." until something else triggers a refetch,
+  // which is exactly what made a successful capture look stuck.
+  const hasUnsettledCaptures = bookmarks.some(
+    (b) => b.capture_status === 'pending' || b.capture_status === 'capturing',
+  );
+
+  useEffect(() => {
+    if (!hasUnsettledCaptures) return;
+    const timer = setInterval(() => {
+      void fetchBookmarks();
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [hasUnsettledCaptures, fetchBookmarks]);
 
   // The drawer is backed by a history entry so the browser/Android Back gesture
   // closes it, which is what a phone user reaches for first.
@@ -538,6 +556,7 @@ export default function HomePage() {
           <BentoGrid
             bookmarks={visibleBookmarks}
             loading={loading}
+            captureEnabled={captureEnabled}
             currentPage={currentPage}
             totalPages={totalPages}
             onPageChange={setCurrentPage}
@@ -569,6 +588,7 @@ export default function HomePage() {
       <PreviewDrawer
         bookmark={drawerPresence.mounted ? drawerBookmark : null}
         active={drawerPresence.active}
+        captureEnabled={captureEnabled}
         onClose={() => setInspectingBookmark(null)}
         onRetry={handleRetryCapture}
         onDelete={handleDeleteBookmark}

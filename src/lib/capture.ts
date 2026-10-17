@@ -1,29 +1,31 @@
-import { chromium, type Browser } from 'playwright';
-import path from 'node:path';
-import fs from 'node:fs';
 import pLimit from 'p-limit';
 import { validateSafeUrl } from './ssrf';
 import { updateBookmarkStatus } from '../db/queries';
+import { config } from './config';
+import {
+  ensureScreenshotDir,
+  renderScreenshot,
+  type CaptureRequest,
+  type CaptureResult,
+} from './captureProviders';
+import { fetchPageMetadata } from './pageMetadata';
 
-const SCREENSHOT_DIR = path.join(process.cwd(), 'public', 'screenshots');
-const limit = pLimit(2); // Concurrency cap
+/**
+ * Effective parallelism.
+ *
+ * The local provider is capped at two contexts: higher caps spike memory and stall the app.
+ * The API provider does its rendering elsewhere, so it may run wider.
+ */
+const effectiveConcurrency = config.captureProviders.includes('local')
+  ? Math.min(2, config.captureConcurrency)
+  : config.captureConcurrency;
 
-let browserInstance: Browser | null = null;
+const limit = pLimit(effectiveConcurrency);
 
-async function getBrowser(): Promise<Browser> {
-  if (!browserInstance || !browserInstance.isConnected()) {
-    browserInstance = await chromium.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
-  }
-  return browserInstance;
-}
+/** Captures that are queued or running in this process, so a duplicate request is a no-op. */
+const inFlight = new Set<string>();
+
+let reconciled = false;
 
 export interface CaptureOptions {
   viewportWidth?: number;
@@ -31,197 +33,152 @@ export interface CaptureOptions {
   timeoutMs?: number;
 }
 
+function settle(bookmarkId: string, result: CaptureResult): CaptureResult {
+  if (result.success && result.screenshotPath) {
+    updateBookmarkStatus(
+      bookmarkId,
+      'ready',
+      result.screenshotPath,
+      null,
+      result.title ?? null,
+      result.faviconUrl ?? null,
+      result.description ?? null,
+    );
+  } else {
+    updateBookmarkStatus(
+      bookmarkId,
+      'failed',
+      null,
+      result.error || 'Screenshot capture failed',
+    );
+  }
+  return result;
+}
+
+/**
+ * Captures a screenshot and records the outcome on the bookmark.
+ *
+ * Every path settles the row: a capture that is accepted and then never finishes is worse than
+ * one that fails, because the card spins forever with no way out. The body is wrapped so an
+ * unexpected throw (a failed browser launch, a network error from the API) is written as
+ * `failed` instead of escaping as an unhandled rejection.
+ */
 export async function captureScreenshot(
   bookmarkId: string,
   url: string,
   options: CaptureOptions = {},
-): Promise<{
-  success: boolean;
-  screenshotPath?: string;
-  title?: string;
-  faviconUrl?: string;
-  error?: string;
-}> {
-  return limit(async () => {
-    // 1. SSRF Safety Check
+): Promise<CaptureResult> {
+  if (!config.captureEnabled) {
+    updateBookmarkStatus(bookmarkId, 'disabled');
+    return { success: false, error: 'Screenshot capture is disabled' };
+  }
+
+  if (inFlight.has(bookmarkId)) {
+    return { success: false, error: 'Capture already in progress' };
+  }
+  inFlight.add(bookmarkId);
+
+  try {
+    // The SSRF guard runs before any browser or HTTP client touches the URL.
     const ssrfCheck = await validateSafeUrl(url);
     if (!ssrfCheck.safe) {
-      const err = ssrfCheck.reason || 'Forbidden URL target';
-      updateBookmarkStatus(bookmarkId, 'failed', null, err);
-      return { success: false, error: err };
-    }
-
-    // 2. Mark capturing in progress
-    updateBookmarkStatus(bookmarkId, 'capturing');
-
-    if (!fs.existsSync(SCREENSHOT_DIR)) {
-      fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
-    }
-
-    const browser = await getBrowser();
-    const context = await browser.newContext({
-      viewport: {
-        width: options.viewportWidth || 1280,
-        height: options.viewportHeight || 800,
-      },
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    });
-
-    const page = await context.newPage();
-    const timeout = options.timeoutMs || 30000;
-    page.setDefaultTimeout(timeout);
-    page.setDefaultNavigationTimeout(timeout);
-
-    try {
-      // 3. Navigate. 'domcontentloaded' is the dependable signal; the asset
-      // waits below cover the rest. Using 'load' or 'networkidle' here stalls on
-      // sites that poll or hold connections open (github.com never reaches
-      // networkidle), which previously pushed captures into the timeout.
-      await page
-        .goto(url, { waitUntil: 'domcontentloaded', timeout })
-        .catch(() => {});
-
-      // Give the page time to finish loading, but cap it: waiting for a fully
-      // idle network is not possible on chatty sites, and a bounded wait still
-      // captures far more assets than a fixed delay alone.
-      await page.waitForLoadState('load', { timeout: 10000 }).catch(() => {});
-      await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {});
-
-      // Decode every image, then let fonts finish so text does not reflow.
-      await page
-        .evaluate(async () => {
-          const images = Array.from(document.images);
-          await Promise.all(
-            images.map((img) =>
-              img.complete
-                ? Promise.resolve()
-                : new Promise<void>((resolve) => {
-                    img.addEventListener('load', () => resolve(), {
-                      once: true,
-                    });
-                    img.addEventListener('error', () => resolve(), {
-                      once: true,
-                    });
-                  }),
-            ),
-          );
-          await document.fonts?.ready?.catch(() => {});
-        })
-        .catch(() => {});
-
-      // Layout stabilisation before the shot.
-      const { promise: delayPromise, resolve: delayResolve } =
-        Promise.withResolvers<void>();
-      setTimeout(delayResolve, 800);
-      await delayPromise;
-
-      let title = (await page.title())?.trim() || undefined;
-      if (
-        !title ||
-        title.startsWith('http://') ||
-        title.startsWith('https://')
-      ) {
-        try {
-          const host = new URL(url).hostname.replace(/^www\./, '');
-          title = host.charAt(0).toUpperCase() + host.slice(1);
-        } catch {
-          title = url;
-        }
-      }
-
-      // Extract meta description automatically
-      const description = await page
-        .evaluate(() => {
-          // 1. Meta tag priority
-          const selectors = [
-            'meta[name="description"]',
-            'meta[property="og:description"]',
-            'meta[name="twitter:description"]',
-            'meta[itemprop="description"]',
-          ];
-          for (const s of selectors) {
-            const val = document.querySelector(s)?.getAttribute('content');
-            if (val && val.trim().length > 5) {
-              return val.trim().slice(0, 240);
-            }
-          }
-          // 2. Main content heuristics (article paragraphs, lead, main)
-          const contentSelectors = [
-            'article p',
-            'main p',
-            '.lead',
-            'header + div p',
-            'p',
-          ];
-          for (const cs of contentSelectors) {
-            const paras = Array.from(document.querySelectorAll(cs));
-            for (const p of paras) {
-              const text = (p as HTMLElement).innerText?.trim();
-              if (
-                text &&
-                text.length > 25 &&
-                !text.includes('cookie') &&
-                !text.includes('JavaScript')
-              ) {
-                return text.slice(0, 240);
-              }
-            }
-          }
-          return null;
-        })
-        .catch(() => null);
-
-      const faviconUrl = `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=64`;
-
-      // 4. Capture screenshot
-      const filename = `${bookmarkId}.webp`;
-      const targetFilePath = path.join(SCREENSHOT_DIR, filename);
-      const publicPath = `/screenshots/${filename}`;
-
-      await page.screenshot({
-        path: targetFilePath,
-        type: 'webp',
-        quality: 80,
-        fullPage: false,
-      });
-
-      // 5. Update DB record to ready
-      updateBookmarkStatus(
-        bookmarkId,
-        'ready',
-        publicPath,
-        null,
-        title,
-        faviconUrl,
-        description,
-      );
-
-      return {
-        success: true,
-        screenshotPath: publicPath,
-        title,
-        description: description || undefined,
-        faviconUrl,
-      };
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Unknown screenshot capture error';
-      updateBookmarkStatus(bookmarkId, 'failed', null, message);
-      return {
+      return settle(bookmarkId, {
         success: false,
-        error: message,
-      };
-    } finally {
-      await page.close().catch(() => {});
-      await context.close().catch(() => {});
+        error: ssrfCheck.reason || 'Forbidden URL target',
+      });
     }
-  });
+
+    ensureScreenshotDir();
+
+    return await limit(async () => {
+      updateBookmarkStatus(bookmarkId, 'capturing');
+
+      const request: CaptureRequest = {
+        bookmarkId,
+        url,
+        timeoutMs: options.timeoutMs ?? config.captureTimeoutMs,
+        launchTimeoutMs: config.captureLaunchTimeoutMs,
+        viewportWidth: options.viewportWidth ?? config.captureViewportWidth,
+        viewportHeight: options.viewportHeight ?? config.captureViewportHeight,
+      };
+
+      try {
+        const result = await renderScreenshot(request);
+
+        // An image-only provider returns no title or description. Reading the page's own meta
+        // tags costs no API quota, so a successful capture always ends up with both when the
+        // page publishes them.
+        if (result.success && (!result.title || !result.description)) {
+          const metadata = await fetchPageMetadata(url, request.timeoutMs);
+          result.title = result.title ?? metadata.title;
+          result.description = result.description ?? metadata.description;
+        }
+
+        return settle(bookmarkId, result);
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : 'Unknown screenshot capture error';
+        return settle(bookmarkId, { success: false, error: message });
+      }
+    });
+  } catch (err: unknown) {
+    // Reached when the guard itself throws, or the limiter is torn down.
+    const message =
+      err instanceof Error ? err.message : 'Unknown screenshot capture error';
+    return settle(bookmarkId, { success: false, error: message });
+  } finally {
+    inFlight.delete(bookmarkId);
+  }
+}
+
+/**
+ * Requeues captures that were interrupted by a restart.
+ *
+ * `capturing` is a claim held by a running process. Nothing advances it after the process
+ * that set it is gone, so on boot those rows would render as spinners forever. They are
+ * queued again, and the caller awaits nothing.
+ */
+export async function recoverInterruptedCaptures(
+  staleIds: Array<{ id: string; url: string }>,
+): Promise<void> {
+  for (const row of staleIds) {
+    void captureScreenshot(row.id, row.url).catch(() => {});
+  }
+}
+
+/**
+ * Runs the boot-time recovery exactly once per process.
+ *
+ * Called from the data layer rather than a framework hook: this project runs on Next's dev
+ * server as much as on `next start`, and a module-level guard survives the module reloads that
+ * dev does, while an instrumentation hook does not.
+ */
+export async function reconcileCaptureStateOnce(): Promise<void> {
+  if (reconciled) return;
+  reconciled = true;
+
+  const { getStalledCaptures, failStalledCaptures } = await import('../db/queries');
+
+  if (!config.captureEnabled) {
+    failStalledCaptures('Screenshot capture is disabled');
+    return;
+  }
+
+  // A capture cannot legitimately run longer than its navigation budget plus the launch
+  // budget, so anything older than both is work that died with the previous process. The grace
+  // period also keeps a second process from stealing a capture that is genuinely in flight.
+  const stalled = getStalledCaptures(
+    config.captureTimeoutMs + config.captureLaunchTimeoutMs,
+  );
+  if (stalled.length > 0) {
+    console.info(`[capture] requeueing ${stalled.length} interrupted capture(s)`);
+    await recoverInterruptedCaptures(stalled);
+  }
 }
 
 export async function closeCaptureBrowser(): Promise<void> {
-  if (browserInstance) {
-    await browserInstance.close().catch(() => {});
-    browserInstance = null;
+  if (config.captureProviders.includes('local')) {
+    const { closeLocalBrowser } = await import('./captureProviders');
+    await closeLocalBrowser();
   }
 }

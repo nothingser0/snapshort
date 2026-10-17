@@ -102,7 +102,10 @@ src/
     queries.ts            reads and status writes
     update.ts             bookmark updates, including tag linking
   lib/
-    capture.ts            Playwright capture worker
+    capture.ts            capture queue, status writes, boot recovery
+    captureProviders.ts   Chromium renderer and external screenshot API
+    config.ts             environment configuration
+    captureStatus.ts      how a stored status is rendered
     ssrf.ts               URL safety validation
     usePresence.ts        mount/unmount transition helper
 ```
@@ -122,12 +125,45 @@ bookmarks ──< bookmark_tags ──< tags
 
 ### Capture pipeline
 
-1. `POST /api/bookmarks` validates the URL (scheme, DNS, SSRF ranges) and inserts the row.
-2. Capture is started in the background and the request returns immediately, so saving feels instant.
-3. The worker renders the page, waits for assets, writes `public/screenshots/<id>.webp` and
-   updates the row to `ready` — or `failed` with the error message.
-4. The grid shows a spinner while `capturing`, the screenshot when `ready`, and a retry
-   button when `failed`.
+1. `POST /api/bookmarks` validates the URL (scheme, DNS, SSRF ranges) and inserts the row as
+   `pending`.
+2. Capture is queued in the background and the request returns immediately, so saving feels
+   instant. The queue holds at most `CAPTURE_CONCURRENCY` jobs; duplicates of a bookmark already
+   in flight are ignored.
+3. The worker renders the page, waits for assets, writes the image and updates the row to
+   `ready` — or `failed` with the error message. **Every path settles the row**: a failed
+   browser launch or a network error from the screenshot API is recorded as `failed` rather
+   than escaping and leaving the card spinning.
+4. The grid shows "Queued..." for `pending`, a spinner for `capturing`, the screenshot for
+   `ready`, and a retry button for `failed`. While any row is unsettled the client refetches
+   every two seconds, so a capture that finishes in the background appears without a manual
+   refresh.
+5. On the first query of a new process, rows left at `pending`/`capturing` by a previous
+   process are queued again — nothing advances them otherwise, and they would render as
+   spinners forever.
+
+Renderers sit behind one interface and are tried in the order given by `CAPTURE_PROVIDER`,
+which accepts a comma-separated chain — `local,thum,sb` renders locally, falls back to a keyless
+service when that fails, then to a keyed one:
+
+| Slot | Renderer | Cost | Metadata |
+|---|---|---|---|
+| `local` | Chromium on this machine | ~280MB disk, 150-250MB RAM per page | Title, description and favicon read from the page |
+| `thum` | thum.io (no key) | A request per capture | Image only |
+| `sb` | screenshotbase (free key) | A request per capture | Image only |
+
+A chain containing `local` is capped at two concurrent captures; API-only chains honour
+`CAPTURE_CONCURRENCY`. When a capture comes back with an image but no metadata, `pageMetadata.ts`
+reads the page's own `<title>`, `og:description` and first paragraph over plain HTTP — that costs
+no API quota and works for every slot.
+
+The SSRF guard runs before either renderer touches the URL. With `api`, the URL is sent to a
+third party — that is a privacy decision, so it is opt-in and never a default. See
+`.env.example` for every setting and provider URL templates.
+
+Captured images are served by `src/app/screenshots/[file]/route.ts`, not from `public/`:
+`next start` serves `public/` as a build-time snapshot, so a file written after the build —
+which is every capture — would return 404.
 
 ### Screenshots and the database
 
